@@ -3,10 +3,6 @@ main = "src/bot/index.ts"
 compatibility_date = "2023-12-18"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-ENV_BOT_TOKEN = ""
-ENV_BOT_SECRET = ""
-
 [[kv_namespaces]]
 binding = "NAMESPACE"
 preview_id = "e025b27c36e4472dbfa62c21a543f742"
