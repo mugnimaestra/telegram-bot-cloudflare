@@ -1,4 +1,4 @@
-name = "telegram-terabox-bot"
+name = "telegram-bot-cloudflare"
 main = "src/bot/index.ts"
 compatibility_date = "2023-12-18"
 compatibility_flags = ["nodejs_compat"]
