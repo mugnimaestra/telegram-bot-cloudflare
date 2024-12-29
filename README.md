@@ -27,10 +27,10 @@ A simple and modern Telegram bot implementation running on Cloudflare Workers, b
 - **Bot Commands:**
   - `/start`, `/help` - Show available commands
   - `/ping` - Test bot connection
-  - `/fetch <url>` - Fetch URL content with anti-bot bypass
+  - `/fetch <url>` - Fetch URL content with browser-like headers
 
 - **API Endpoints:**
-  - `POST /api/fetch_url` - Fetch URL content with customized headers
+  - `POST /api/fetch_url` - Fetch URL content with browser-like request headers
 
 ## Prerequisites
 
@@ -99,7 +99,7 @@ A simple and modern Telegram bot implementation running on Cloudflare Workers, b
 ## API Documentation
 
 ### POST /api/fetch_url
-Fetches content from a URL with anti-bot headers.
+Fetches content from a URL using browser-like headers to improve compatibility with basic website access.
 
 Request:
 ```json
