@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Update, Message, TelegramResponse } from "@/types/telegram";
-import api from "../api/server";
 import type { Env } from "@/types/env";
 
 const WEBHOOK = "/endpoint";
@@ -20,9 +19,6 @@ app.use("*", async (c, next) => {
   c.set("baseUrl", `https://${c.req.header("host")}`);
   await next();
 });
-
-// Mount API routes
-app.route("/api", api);
 
 // Bot webhook handler
 app.post(WEBHOOK, async (c) => {
@@ -112,32 +108,27 @@ async function onMessage(
     return sendPlainText(
       token,
       message.chat.id,
-      `${greeting}, ${userName}! 🏓\nPong! Bot is alive and well!`
+      `${greeting}, ${userName}! 🏓\nPong! Bot is alive and well!`,
+      message
     );
   }
 
   if (message.text.startsWith("/start") || message.text.startsWith("/help")) {
+    const userName = message.from?.first_name || "there";
     return sendMarkdownV2Text(
       token,
       message.chat.id,
-      "*Available Commands:*\n" +
-        "`/help` \\- Show this message\n" +
-        "`/ping` \\- Test bot connection\n" +
-        "`/fetch` \\- Fetch URL with browser\\-like headers\n" +
-        "`/nh` \\- Fetch data from nhapi \\(Example: /nh 546408\\)"
+      `Hello ${escapeMarkdown(userName)}\\! Welcome to UMP9 Bot 🤖\n\n` +
+        `*Available Commands:*\n` +
+        `\n🔍 *Basic Commands:*\n` +
+        `\`/help\` \\- Show this message\n` +
+        `\`/ping\` \\- Check if bot is alive\n` +
+        `\n📚 *NH Commands:*\n` +
+        `\`/nh <id>\` \\- Fetch data from nhapi\n` +
+        `Example: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`\n\n` +
+        `Bot Version: 1\\.0\\.0`,
+      message
     );
-  }
-
-  if (message.text.startsWith("/fetch")) {
-    const url = message.text.split(" ")[1];
-    if (!url) {
-      return sendPlainText(
-        token,
-        message.chat.id,
-        "Please provide a URL. Example:\n/fetch https://example.com"
-      );
-    }
-    return handleFetchCommand(token, message.chat.id, url, baseUrl);
   }
 
   if (message.text.startsWith("/nh")) {
@@ -146,53 +137,19 @@ async function onMessage(
       return sendPlainText(
         token,
         message.chat.id,
-        "Please provide an ID or URL. Example:\n/nh 546408\n/nh https://nhentai.net/g/546408/"
+        "Please provide an ID or URL. Example:\n/nh 546408\n/nh https://nhentai.net/g/546408/",
+        message
       );
     }
-    return handleNHCommand(token, message.chat.id, input);
+    return handleNHCommand(token, message.chat.id, input, message);
   }
 
   return sendPlainText(
     token,
     message.chat.id,
-    "Unknown command. Use /help to see available commands."
+    "Unknown command. Use /help to see available commands.",
+    message
   );
-}
-
-async function handleFetchCommand(
-  token: string,
-  chatId: number,
-  url: string,
-  baseUrl: string
-): Promise<TelegramResponse> {
-  try {
-    const response = await fetch(`${baseUrl}/api/fetch_url`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-
-    const data = (await response.json()) as {
-      status: string;
-      message: string;
-    };
-
-    if (data.status === "success") {
-      return sendMarkdownV2Text(
-        token,
-        chatId,
-        `*Successfully fetched URL*\n${escapeMarkdown(data.message)}`
-      );
-    } else {
-      return sendPlainText(token, chatId, `Error: ${data.message}`);
-    }
-  } catch (error) {
-    return sendPlainText(
-      token,
-      chatId,
-      "Failed to fetch URL. Please try again later."
-    );
-  }
 }
 
 async function formatNHResponse(data: any): Promise<string> {
@@ -228,14 +185,16 @@ async function formatNHResponse(data: any): Promise<string> {
 async function handleNHCommand(
   token: string,
   chatId: number,
-  input: string
+  input: string,
+  originalMessage: Message
 ): Promise<TelegramResponse> {
   console.log(`[NH] Processing request for ID: ${input}`);
 
   const loadingMessage = await sendPlainText(
     token,
     chatId,
-    "🔍 Please wait, fetching data... This might take up to 5 minutes."
+    "🔍 Please wait, fetching data... This might take up to 5 minutes.",
+    originalMessage
   );
 
   try {
@@ -261,22 +220,32 @@ async function handleNHCommand(
     console.log(`[NH] Data fetched successfully for ID: ${id}`);
 
     // Delete the loading message
-    await fetch(
-      apiUrl(token, "deleteMessage", {
-        chat_id: chatId,
-        message_id: loadingMessage.result.message_id,
-      })
-    );
+    const deleteParams: Record<string, any> = {
+      chat_id: chatId,
+      message_id: loadingMessage.result.message_id,
+    };
+
+    // Include message_thread_id if it exists
+    if (originalMessage.message_thread_id) {
+      deleteParams.message_thread_id = originalMessage.message_thread_id;
+    }
+
+    await fetch(apiUrl(token, "deleteMessage", deleteParams));
 
     // Format and send the response
     const formattedResponse = await formatNHResponse(data);
-    const sendResult = await fetch(
-      apiUrl(token, "sendMessage", {
-        chat_id: chatId,
-        text: formattedResponse,
-        parse_mode: "Markdown",
-      })
-    );
+    const sendParams: Record<string, any> = {
+      chat_id: chatId,
+      text: formattedResponse,
+      parse_mode: "Markdown",
+    };
+
+    // Include message_thread_id if it exists
+    if (originalMessage.message_thread_id) {
+      sendParams.message_thread_id = originalMessage.message_thread_id;
+    }
+
+    const sendResult = await fetch(apiUrl(token, "sendMessage", sendParams));
 
     const finalResponse = (await sendResult.json()) as TelegramResponse;
     if (!finalResponse.ok) {
@@ -292,19 +261,29 @@ async function handleNHCommand(
     );
 
     if (loadingMessage.ok) {
-      await fetch(
-        apiUrl(token, "deleteMessage", {
-          chat_id: chatId,
-          message_id: loadingMessage.result.message_id,
-        })
-      );
+      const deleteParams: Record<string, any> = {
+        chat_id: chatId,
+        message_id: loadingMessage.result.message_id,
+      };
+
+      // Include message_thread_id if it exists
+      if (originalMessage.message_thread_id) {
+        deleteParams.message_thread_id = originalMessage.message_thread_id;
+      }
+
+      await fetch(apiUrl(token, "deleteMessage", deleteParams));
     }
 
     const errorText = `Error: ${
       error instanceof Error ? error.message : "Unknown error"
     }`;
 
-    const errorResponse = await sendPlainText(token, chatId, errorText);
+    const errorResponse = await sendPlainText(
+      token,
+      chatId,
+      errorText,
+      originalMessage
+    );
     return errorResponse;
   }
 }
@@ -316,32 +295,40 @@ function escapeMarkdown(text: string): string {
 async function sendPlainText(
   token: string,
   chatId: number,
-  text: string
+  text: string,
+  replyToMessage?: Message
 ): Promise<TelegramResponse> {
-  return (
-    await fetch(
-      apiUrl(token, "sendMessage", {
-        chat_id: chatId,
-        text,
-      })
-    )
-  ).json();
+  const params: Record<string, any> = {
+    chat_id: chatId,
+    text,
+  };
+
+  // If message is from a topic, use the same topic
+  if (replyToMessage?.message_thread_id) {
+    params.message_thread_id = replyToMessage.message_thread_id;
+  }
+
+  return (await fetch(apiUrl(token, "sendMessage", params))).json();
 }
 
 async function sendMarkdownV2Text(
   token: string,
   chatId: number,
-  text: string
+  text: string,
+  replyToMessage?: Message
 ): Promise<TelegramResponse> {
-  return (
-    await fetch(
-      apiUrl(token, "sendMessage", {
-        chat_id: chatId,
-        text,
-        parse_mode: "MarkdownV2",
-      })
-    )
-  ).json();
+  const params: Record<string, any> = {
+    chat_id: chatId,
+    text,
+    parse_mode: "MarkdownV2",
+  };
+
+  // If message is from a topic, use the same topic
+  if (replyToMessage?.message_thread_id) {
+    params.message_thread_id = replyToMessage.message_thread_id;
+  }
+
+  return (await fetch(apiUrl(token, "sendMessage", params))).json();
 }
 
 function apiUrl(
