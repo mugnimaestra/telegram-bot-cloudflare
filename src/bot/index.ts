@@ -250,6 +250,38 @@ async function formatNHResponse(data: NHAPIResponse): Promise<string> {
 📅 Upload Date: ${new Date(data.upload_date * 1000).toLocaleDateString()}`;
 }
 
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit & { timeout?: number } = {},
+  retries = 3
+): Promise<Response> {
+  const { timeout = 300000, ...fetchOptions } = options; // Default 5 minutes timeout
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === "AbortError") {
+      if (retries > 0) {
+        console.log(
+          `[NH] Request timed out, retrying... (${retries} retries left)`
+        );
+        return fetchWithTimeout(url, options, retries - 1);
+      }
+      throw new Error("Request timed out after all retries");
+    }
+    throw error;
+  }
+}
+
 async function handleNHCommand(
   token: string,
   chatId: number,
@@ -274,10 +306,12 @@ async function handleNHCommand(
 
     console.log(`[NH] Fetching data for ID: ${id} from ${nhApiUrl}`);
 
-    const response = await fetch(`${nhApiUrl}/get?id=${id}`, {
+    // Use fetchWithTimeout instead of regular fetch
+    const response = await fetchWithTimeout(`${nhApiUrl}/get?id=${id}`, {
       headers: {
         Accept: "application/json",
       },
+      timeout: 300000, // 5 minutes timeout
     });
 
     if (!response.ok) {
