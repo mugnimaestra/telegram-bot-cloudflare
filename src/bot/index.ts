@@ -42,6 +42,26 @@ app.post(WEBHOOK, async (c) => {
     console.log(
       `[Webhook] Processing command: ${update.message.text?.split(" ")[0]}`
     );
+
+    // Handle new chat members (bot added to group)
+    if (update.message.new_chat_members) {
+      const botWasAdded = update.message.new_chat_members.some(
+        (member: { id: number }) =>
+          member.id.toString() === c.env.ENV_BOT_TOKEN.split(":")[0]
+      );
+      if (botWasAdded) {
+        console.log("[Webhook] Bot was added to a group");
+        const messagePromise = sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "Hello\\! I'm UMP9 Bot 🤖\n\nUse /help to see available commands\\.",
+          update.message
+        );
+        c.executionCtx.waitUntil(messagePromise);
+        return c.text("Ok");
+      }
+    }
+
     const messagePromise = onMessage(
       c.env.ENV_BOT_TOKEN,
       update.message,
@@ -81,6 +101,13 @@ app.get(
         apiUrl(c.env.ENV_BOT_TOKEN, "setWebhook", {
           url: webhookUrl,
           secret_token: c.env.ENV_BOT_SECRET,
+          allowed_updates: [
+            "message",
+            "edited_message",
+            "channel_post",
+            "edited_channel_post",
+          ],
+          drop_pending_updates: true,
         })
       )
     ).json();
