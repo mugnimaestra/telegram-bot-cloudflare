@@ -46,7 +46,8 @@ app.post(WEBHOOK, async (c) => {
       c.env.ENV_BOT_TOKEN,
       update.message,
       c.get("baseUrl"),
-      c.env.BUCKET
+      c.env.BUCKET,
+      c.env.NH_API_URL
     );
     c.executionCtx.waitUntil(
       messagePromise.then(
@@ -94,11 +95,32 @@ app.get(
   }
 );
 
+// Unregister webhook
+app.get(
+  "/unRegisterWebhook",
+  async (c: Context<{ Bindings: Env["Bindings"] }>) => {
+    console.log("[Unregister Webhook] Attempting to remove webhook");
+
+    const r: TelegramResponse = await (
+      await fetch(apiUrl(c.env.ENV_BOT_TOKEN, "setWebhook", { url: "" }))
+    ).json();
+
+    if (r.ok) {
+      console.log("[Unregister Webhook] Successfully removed webhook");
+    } else {
+      console.error("[Unregister Webhook] Failed to remove webhook:", r);
+    }
+
+    return c.text(r.ok ? "Ok" : JSON.stringify(r, null, 2));
+  }
+);
+
 async function onMessage(
   token: string,
   message: Message,
   baseUrl: string,
-  bucket: R2Bucket
+  bucket: R2Bucket,
+  nhApiUrl: string
 ): Promise<TelegramResponse> {
   if (!message.text) {
     return { ok: false, description: "No text in message" };
@@ -149,7 +171,14 @@ async function onMessage(
         message
       );
     }
-    return handleNHCommand(token, message.chat.id, input, message, bucket);
+    return handleNHCommand(
+      token,
+      message.chat.id,
+      input,
+      message,
+      bucket,
+      nhApiUrl
+    );
   }
 
   return sendPlainText(
@@ -199,7 +228,8 @@ async function handleNHCommand(
   chatId: number,
   input: string,
   originalMessage: Message,
-  bucket: R2Bucket
+  bucket: R2Bucket,
+  nhApiUrl: string
 ): Promise<TelegramResponse> {
   console.log(`[NH] Processing request for ID: ${input}`);
 
@@ -215,16 +245,13 @@ async function handleNHCommand(
       ? input.split("nhentai.net/g/")[1].replace(/\//g, "")
       : input;
 
-    console.log(`[NH] Fetching data for ID: ${id}`);
+    console.log(`[NH] Fetching data for ID: ${id} from ${nhApiUrl}`);
 
-    const response = await fetch(
-      `https://nhapiod-proxy.onrender.com/get?id=${id}`,
-      {
-        headers: {
-          Accept: "application/json",
-        },
-      }
-    );
+    const response = await fetch(`${nhApiUrl}/get?id=${id}`, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
 
     if (!response.ok) {
       throw new Error(`API request failed with status: ${response.status}`);
@@ -277,17 +304,56 @@ async function handleNHCommand(
       // Extract the key from the R2 URL
       const r2Url = new URL(data.pdf_url);
       const key = r2Url.pathname.slice(1); // Remove leading slash
-      console.log(`[NH] Fetching PDF from R2 with key: ${key}`);
+      console.log(`[NH] PDF URL: ${data.pdf_url}`);
+      console.log(`[NH] Extracted R2 key: ${key}`);
+
+      // List objects in bucket to verify access
+      console.log("[NH] Listing bucket objects...");
+      try {
+        // Try listing with no prefix first to see all objects
+        console.log("[NH] Listing all objects in bucket...");
+        const allObjects = await bucket.list();
+        console.log("[NH] All objects in bucket:", allObjects);
+
+        // Then try with the specific prefix
+        const galleryPrefix = key.split("/")[0];
+        console.log(`[NH] Listing objects with prefix '${galleryPrefix}'...`);
+        const listed = await bucket.list({ prefix: galleryPrefix });
+        console.log("[NH] Bucket list result for gallery:", listed);
+
+        // Try to list the specific gallery
+        const galleryId = key.split("/")[1];
+        console.log(
+          `[NH] Listing objects with prefix '${galleryPrefix}/${galleryId}'...`
+        );
+        const galleryObjects = await bucket.list({
+          prefix: `${galleryPrefix}/${galleryId}`,
+        });
+        console.log("[NH] Gallery objects:", galleryObjects);
+      } catch (listError) {
+        console.error("[NH] Error listing bucket:", listError);
+      }
 
       // Get the object directly from R2
+      console.log(`[NH] Attempting to get object from R2...`);
       const pdfObject = await bucket.get(key);
 
+      console.log("[NH] R2 object metadata:", {
+        key: pdfObject?.key,
+        size: pdfObject?.size,
+        etag: pdfObject?.etag,
+        httpEtag: pdfObject?.httpEtag,
+      });
+
       if (!pdfObject) {
-        throw new Error("PDF not found in R2 storage");
+        throw new Error(`PDF not found in R2 storage for key: ${key}`);
       }
 
       // Get the PDF data
+      console.log("[NH] Converting R2 object to blob...");
       const pdfBlob = await pdfObject.blob();
+      console.log("[NH] PDF blob size:", pdfBlob.size);
+
       const formData = new FormData();
 
       // Get the title with correct priority

@@ -12,6 +12,7 @@ export interface Env {
     R2_BUCKET_NAME: string;
     R2_PUBLIC_URL: string;
     BUCKET: R2Bucket;
+    NH_API_URL: string;
   };
 }
 
