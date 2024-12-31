@@ -58,3 +58,46 @@ export interface TelegramResponse<T = any> {
     [key: string]: any;
   };
 }
+
+// NH API Types
+export interface NHAPIResponse {
+  id: number;
+  media_id: string;
+  num_favorites: number;
+  num_pages: number;
+  pdf_url: string;
+  scanlator: string;
+  images: {
+    cover: NHImage;
+    thumbnail: NHImage;
+    pages: NHPage[];
+  };
+  tags: NHTag[];
+  title: {
+    english: string;
+    japanese: string;
+    pretty: string;
+  };
+  upload_date: number;
+}
+
+interface NHImage {
+  h: number;
+  w: number;
+  t: string;
+}
+
+interface NHPage extends NHImage {
+  cdn_url: string;
+  thumbnail: string;
+  thumbnail_cdn: string;
+  url: string;
+}
+
+interface NHTag {
+  id: number;
+  type: "tag" | "category" | "artist" | "parody" | "language";
+  name: string;
+  url: string;
+  count: number;
+}

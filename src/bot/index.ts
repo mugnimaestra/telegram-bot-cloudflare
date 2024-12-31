@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Update, Message, TelegramResponse } from "@/types/telegram";
+import type {
+  Update,
+  Message,
+  TelegramResponse,
+  NHAPIResponse,
+} from "@/types/telegram";
 import type { Env } from "@/types/env";
+import type { R2Bucket } from "@cloudflare/workers-types";
 
 const WEBHOOK = "/endpoint";
 
@@ -39,7 +45,8 @@ app.post(WEBHOOK, async (c) => {
     const messagePromise = onMessage(
       c.env.ENV_BOT_TOKEN,
       update.message,
-      c.get("baseUrl")
+      c.get("baseUrl"),
+      c.env.BUCKET
     );
     c.executionCtx.waitUntil(
       messagePromise.then(
@@ -90,7 +97,8 @@ app.get(
 async function onMessage(
   token: string,
   message: Message,
-  baseUrl: string
+  baseUrl: string,
+  bucket: R2Bucket
 ): Promise<TelegramResponse> {
   if (!message.text) {
     return { ok: false, description: "No text in message" };
@@ -141,7 +149,7 @@ async function onMessage(
         message
       );
     }
-    return handleNHCommand(token, message.chat.id, input, message);
+    return handleNHCommand(token, message.chat.id, input, message, bucket);
   }
 
   return sendPlainText(
@@ -152,28 +160,32 @@ async function onMessage(
   );
 }
 
-async function formatNHResponse(data: any): Promise<string> {
-  const tags = data.tags
-    .filter((tag: any) => tag.type === "tag")
-    .map((tag: any) => tag.name)
-    .join(", ");
+async function formatNHResponse(data: NHAPIResponse): Promise<string> {
+  // Group tags by type
+  const groupedTags = data.tags.reduce((acc, tag) => {
+    if (!acc[tag.type]) {
+      acc[tag.type] = [];
+    }
+    acc[tag.type].push(tag.name);
+    return acc;
+  }, {} as Record<string, string[]>);
 
-  const languages = data.tags
-    .filter((tag: any) => tag.type === "language")
-    .map((tag: any) => tag.name)
-    .join(", ");
+  const title =
+    data.title.english || data.title.pretty || data.title.japanese || "N/A";
+  const artists = groupedTags["artist"]?.join(", ") || "N/A";
+  const tags = groupedTags["tag"]?.join(", ") || "N/A";
+  const languages = groupedTags["language"]?.join(", ") || "N/A";
+  const parody = groupedTags["parody"]?.join(", ") || "Original";
+  const category = groupedTags["category"]?.join(", ") || "N/A";
 
-  const artists = data.tags
-    .filter((tag: any) => tag.type === "artist")
-    .map((tag: any) => tag.name)
-    .join(", ");
-
-  return `📖 *Title*: ${data.title.english || data.title.pretty || "N/A"}
+  return `📖 *Title*: ${title}
 
 📊 *Info*:
 • ID: ${data.id}
 • Pages: ${data.num_pages}
 • Favorites: ${data.num_favorites}
+• Category: ${category}
+• Parody: ${parody}
 • Language: ${languages}
 • Artist: ${artists}
 
@@ -186,14 +198,15 @@ async function handleNHCommand(
   token: string,
   chatId: number,
   input: string,
-  originalMessage: Message
+  originalMessage: Message,
+  bucket: R2Bucket
 ): Promise<TelegramResponse> {
   console.log(`[NH] Processing request for ID: ${input}`);
 
   const loadingMessage = await sendPlainText(
     token,
     chatId,
-    "🔍 Please wait, fetching data... This might take up to 5 minutes.",
+    "🔍 Please wait, fetching data...",
     originalMessage
   );
 
@@ -203,6 +216,7 @@ async function handleNHCommand(
       : input;
 
     console.log(`[NH] Fetching data for ID: ${id}`);
+
     const response = await fetch(
       `https://nhapiod-proxy.onrender.com/get?id=${id}`,
       {
@@ -216,7 +230,7 @@ async function handleNHCommand(
       throw new Error(`API request failed with status: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as NHAPIResponse;
     console.log(`[NH] Data fetched successfully for ID: ${id}`);
 
     // Delete the loading message
@@ -225,35 +239,130 @@ async function handleNHCommand(
       message_id: loadingMessage.result.message_id,
     };
 
-    // Include message_thread_id if it exists
     if (originalMessage.message_thread_id) {
       deleteParams.message_thread_id = originalMessage.message_thread_id;
     }
 
     await fetch(apiUrl(token, "deleteMessage", deleteParams));
 
-    // Format and send the response
+    // Format and send the info message
     const formattedResponse = await formatNHResponse(data);
     const sendParams: Record<string, any> = {
       chat_id: chatId,
       text: formattedResponse,
       parse_mode: "Markdown",
+      disable_web_page_preview: true,
     };
 
-    // Include message_thread_id if it exists
     if (originalMessage.message_thread_id) {
       sendParams.message_thread_id = originalMessage.message_thread_id;
     }
 
     const sendResult = await fetch(apiUrl(token, "sendMessage", sendParams));
+    const infoResponse = (await sendResult.json()) as TelegramResponse;
 
-    const finalResponse = (await sendResult.json()) as TelegramResponse;
-    if (!finalResponse.ok) {
-      throw new Error("Failed to send message to user");
+    if (!infoResponse.ok) {
+      throw new Error("Failed to send info message to user");
     }
 
-    console.log(`[NH] Response sent successfully for ID: ${id}`);
-    return finalResponse;
+    // Send a temporary message while downloading PDF
+    const pdfLoadingMessage = await sendPlainText(
+      token,
+      chatId,
+      "📥 Downloading PDF, please wait...",
+      originalMessage
+    );
+
+    try {
+      // Extract the key from the R2 URL
+      const r2Url = new URL(data.pdf_url);
+      const key = r2Url.pathname.slice(1); // Remove leading slash
+      console.log(`[NH] Fetching PDF from R2 with key: ${key}`);
+
+      // Get the object directly from R2
+      const pdfObject = await bucket.get(key);
+
+      if (!pdfObject) {
+        throw new Error("PDF not found in R2 storage");
+      }
+
+      // Get the PDF data
+      const pdfBlob = await pdfObject.blob();
+      const formData = new FormData();
+
+      // Get the title with correct priority
+      const displayTitle =
+        data.title.english || data.title.pretty || data.title.japanese || "N/A";
+
+      // Create a clean filename
+      const cleanTitle = displayTitle
+        .replace(/[^\w\s-]/g, "") // Remove special characters
+        .replace(/\s+/g, "_") // Replace spaces with underscores
+        .toLowerCase();
+      const filename = `${cleanTitle}_${data.id}.pdf`;
+
+      // Add caption to the document
+      formData.append("document", pdfBlob, filename);
+      formData.append("chat_id", chatId.toString());
+      formData.append("caption", `${displayTitle} (ID: ${data.id})`);
+
+      if (originalMessage.message_thread_id) {
+        formData.append(
+          "message_thread_id",
+          originalMessage.message_thread_id.toString()
+        );
+      }
+
+      // Send PDF as document
+      const documentResponse = await fetch(
+        `https://api.telegram.org/bot${token}/sendDocument`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const documentResult =
+        (await documentResponse.json()) as TelegramResponse;
+
+      if (!documentResult.ok) {
+        throw new Error("Failed to send PDF document");
+      }
+
+      // Delete the PDF loading message
+      const deletePdfLoadingParams: Record<string, any> = {
+        chat_id: chatId,
+        message_id: pdfLoadingMessage.result.message_id,
+      };
+
+      if (originalMessage.message_thread_id) {
+        deletePdfLoadingParams.message_thread_id =
+          originalMessage.message_thread_id;
+      }
+
+      await fetch(apiUrl(token, "deleteMessage", deletePdfLoadingParams));
+
+      console.log(`[NH] Response and PDF sent successfully for ID: ${id}`);
+      return documentResult;
+    } catch (pdfError) {
+      console.error("[NH] PDF Error:", pdfError);
+
+      // Update the loading message to show error
+      const errorParams: Record<string, any> = {
+        chat_id: chatId,
+        message_id: pdfLoadingMessage.result.message_id,
+        text: `❌ Failed to download PDF: ${
+          pdfError instanceof Error ? pdfError.message : "Unknown error"
+        }`,
+      };
+
+      if (originalMessage.message_thread_id) {
+        errorParams.message_thread_id = originalMessage.message_thread_id;
+      }
+
+      await fetch(apiUrl(token, "editMessageText", errorParams));
+      return infoResponse;
+    }
   } catch (error) {
     console.error(
       `[NH] Error:`,
@@ -266,7 +375,6 @@ async function handleNHCommand(
         message_id: loadingMessage.result.message_id,
       };
 
-      // Include message_thread_id if it exists
       if (originalMessage.message_thread_id) {
         deleteParams.message_thread_id = originalMessage.message_thread_id;
       }
@@ -278,13 +386,7 @@ async function handleNHCommand(
       error instanceof Error ? error.message : "Unknown error"
     }`;
 
-    const errorResponse = await sendPlainText(
-      token,
-      chatId,
-      errorText,
-      originalMessage
-    );
-    return errorResponse;
+    return sendPlainText(token, chatId, errorText, originalMessage);
   }
 }
 
