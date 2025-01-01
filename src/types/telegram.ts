@@ -28,7 +28,7 @@ export interface User {
 
 export interface Chat {
   id: number;
-  type: "private" | "group" | "supergroup" | "channel";
+  type: ChatType;
   title?: string;
   username?: string;
   first_name?: string;
@@ -60,44 +60,76 @@ export interface TelegramResponse<T = any> {
 }
 
 // NH API Types
+export enum PDFStatus {
+  PROCESSING = "processing",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
+
+export enum TagType {
+  TAG = "tag",
+  CATEGORY = "category",
+  ARTIST = "artist",
+  PARODY = "parody",
+  CHARACTER = "character",
+  GROUP = "group",
+  LANGUAGE = "language",
+}
+
+export enum ImageType {
+  JPG = "j",
+  PNG = "p",
+  GIF = "g",
+  WEBP = "w",
+}
+
+export enum ChatType {
+  PRIVATE = "private",
+  GROUP = "group",
+  SUPERGROUP = "supergroup",
+  CHANNEL = "channel",
+}
+
 export interface NHAPIResponse {
   id: number;
   media_id: string;
-  num_favorites: number;
-  num_pages: number;
-  pdf_url: string;
-  scanlator: string;
-  images: {
-    cover: NHImage;
-    thumbnail: NHImage;
-    pages: NHPage[];
-  };
-  tags: NHTag[];
   title: {
     english: string;
     japanese: string;
     pretty: string;
   };
+  images: {
+    pages: Array<{
+      t: ImageType;
+      w: number;
+      h: number;
+      thumbnail: string;
+      url: string;
+      cdn_url: string;
+      thumbnail_cdn: string;
+    }>;
+    cover: {
+      t: ImageType;
+      w: number;
+      h: number;
+    };
+    thumbnail: {
+      t: ImageType;
+      w: number;
+      h: number;
+    };
+  };
+  scanlator: string;
   upload_date: number;
-}
-
-interface NHImage {
-  h: number;
-  w: number;
-  t: string;
-}
-
-interface NHPage extends NHImage {
-  cdn_url: string;
-  thumbnail: string;
-  thumbnail_cdn: string;
-  url: string;
-}
-
-interface NHTag {
-  id: number;
-  type: "tag" | "category" | "artist" | "parody" | "language";
-  name: string;
-  url: string;
-  count: number;
+  tags: Array<{
+    id: number;
+    type: TagType;
+    name: string;
+    url: string;
+    count: number;
+  }>;
+  num_pages: number;
+  num_favorites: number;
+  pdf_status: PDFStatus;
+  pdf_url?: string;
 }

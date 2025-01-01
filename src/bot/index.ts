@@ -6,6 +6,11 @@ import type {
   TelegramResponse,
   NHAPIResponse,
 } from "@/types/telegram";
+import {
+  PDFStatus as PDFStatusEnum,
+  TagType as TagTypeEnum,
+} from "@/types/telegram";
+import type { TelegraphAccount, TelegraphPage, Node } from "@/types/telegraph";
 import type { Env } from "@/types/env";
 import type { R2Bucket } from "@cloudflare/workers-types";
 
@@ -16,7 +21,9 @@ type Variables = {
 };
 
 const app = new Hono<{
-  Bindings: Env["Bindings"];
+  Bindings: Env["Bindings"] & {
+    KV: KVNamespace;
+  };
   Variables: Variables;
 }>();
 
@@ -67,7 +74,8 @@ app.post(WEBHOOK, async (c) => {
       update.message,
       c.get("baseUrl"),
       c.env.BUCKET,
-      c.env.NH_API_URL
+      c.env.NH_API_URL,
+      c.env.KV
     );
     c.executionCtx.waitUntil(
       messagePromise.then(
@@ -147,7 +155,8 @@ async function onMessage(
   message: Message,
   baseUrl: string,
   bucket: R2Bucket,
-  nhApiUrl: string
+  nhApiUrl: string,
+  kv: KVNamespace
 ): Promise<TelegramResponse> {
   if (!message.text) {
     return { ok: false, description: "No text in message" };
@@ -204,7 +213,8 @@ async function onMessage(
       input,
       message,
       bucket,
-      nhApiUrl
+      nhApiUrl,
+      kv
     );
   }
 
@@ -217,22 +227,21 @@ async function onMessage(
 }
 
 async function formatNHResponse(data: NHAPIResponse): Promise<string> {
-  // Group tags by type
   const groupedTags = data.tags.reduce((acc, tag) => {
     if (!acc[tag.type]) {
       acc[tag.type] = [];
     }
     acc[tag.type].push(tag.name);
     return acc;
-  }, {} as Record<string, string[]>);
+  }, {} as Record<TagTypeEnum, string[]>);
 
   const title =
     data.title.english || data.title.pretty || data.title.japanese || "N/A";
-  const artists = groupedTags["artist"]?.join(", ") || "N/A";
-  const tags = groupedTags["tag"]?.join(", ") || "N/A";
-  const languages = groupedTags["language"]?.join(", ") || "N/A";
-  const parody = groupedTags["parody"]?.join(", ") || "Original";
-  const category = groupedTags["category"]?.join(", ") || "N/A";
+  const artists = groupedTags[TagTypeEnum.ARTIST]?.join(", ") || "N/A";
+  const tags = groupedTags[TagTypeEnum.TAG]?.join(", ") || "N/A";
+  const languages = groupedTags[TagTypeEnum.LANGUAGE]?.join(", ") || "N/A";
+  const parody = groupedTags[TagTypeEnum.PARODY]?.join(", ") || "Original";
+  const category = groupedTags[TagTypeEnum.CATEGORY]?.join(", ") || "N/A";
 
   return `📖 *Title*: ${title}
 
@@ -300,12 +309,13 @@ async function handleNHCommand(
   input: string,
   originalMessage: Message,
   bucket: R2Bucket,
-  nhApiUrl: string
+  nhApiUrl: string,
+  kv: KVNamespace
 ): Promise<TelegramResponse> {
   const loadingMessage = await sendPlainText(
     token,
     chatId,
-    "🔍 Fetching data (this might take a few attempts)...",
+    "🔍 Fetching data...",
     originalMessage
   );
 
@@ -315,216 +325,153 @@ async function handleNHCommand(
       : input;
 
     console.log(`[NH] Starting fetch for ID: ${id}`);
+    const data = await fetchNHData(nhApiUrl, id);
 
-    const response = await fetchWithTimeout(`${nhApiUrl}/get?id=${id}`, {
-      headers: {
-        Accept: "application/json",
-      },
-      timeout: 5000,
-    }).catch(async (error) => {
-      if (error.name === "AbortError") {
-        await sendPlainText(
-          token,
-          chatId,
-          "❌ API request failed due to timeout. The free plan has strict time limits. Please try again in a few moments.",
-          originalMessage
-        );
-      } else {
-        await sendPlainText(
-          token,
-          chatId,
-          `❌ Error: ${error.message}`,
-          originalMessage
-        );
-      }
-      throw error;
-    });
-
-    if (!response.ok) {
-      throw new Error(`API request failed with status: ${response.status}`);
-    }
-
-    const data = (await response.json()) as NHAPIResponse;
-    console.log(`[NH] Data fetched successfully for ID: ${id}`);
-
-    const deleteParams: Record<string, any> = {
-      chat_id: chatId,
-      message_id: loadingMessage.result.message_id,
-    };
-
-    if (originalMessage.message_thread_id) {
-      deleteParams.message_thread_id = originalMessage.message_thread_id;
-    }
-
-    await fetch(apiUrl(token, "deleteMessage", deleteParams));
-
+    // Send basic info first
     const formattedResponse = await formatNHResponse(data);
-    const sendParams: Record<string, any> = {
-      chat_id: chatId,
-      text: formattedResponse,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-    };
+    await sendMarkdownV2Text(token, chatId, formattedResponse, originalMessage);
 
-    if (originalMessage.message_thread_id) {
-      sendParams.message_thread_id = originalMessage.message_thread_id;
-    }
-
-    const sendResult = await fetch(apiUrl(token, "sendMessage", sendParams));
-    const infoResponse = (await sendResult.json()) as TelegramResponse;
-
-    if (!infoResponse.ok) {
-      throw new Error("Failed to send info message to user");
-    }
-
-    const pdfLoadingMessage = await sendPlainText(
-      token,
-      chatId,
-      "📥 Downloading PDF, please wait...",
-      originalMessage
-    );
-
-    try {
-      const r2Url = new URL(data.pdf_url);
-      const key = r2Url.pathname.slice(1);
-      console.log(`[NH] PDF URL: ${data.pdf_url}`);
-      console.log(`[NH] Extracted R2 key: ${key}`);
-
-      console.log("[NH] Listing bucket objects...");
-      try {
-        console.log("[NH] Listing all objects in bucket...");
-        const allObjects = await bucket.list();
-        console.log("[NH] All objects in bucket:", allObjects);
-
-        const galleryPrefix = key.split("/")[0];
-        console.log(`[NH] Listing objects with prefix '${galleryPrefix}'...`);
-        const listed = await bucket.list({ prefix: galleryPrefix });
-        console.log("[NH] Bucket list result for gallery:", listed);
-
-        const galleryId = key.split("/")[1];
-        console.log(
-          `[NH] Listing objects with prefix '${galleryPrefix}/${galleryId}'...`
-        );
-        const galleryObjects = await bucket.list({
-          prefix: `${galleryPrefix}/${galleryId}`,
-        });
-        console.log("[NH] Gallery objects:", galleryObjects);
-      } catch (listError) {
-        console.error("[NH] Error listing bucket:", listError);
-      }
-
-      console.log(`[NH] Attempting to get object from R2...`);
-      const pdfObject = await bucket.get(key);
-
-      console.log("[NH] R2 object metadata:", {
-        key: pdfObject?.key,
-        size: pdfObject?.size,
-        etag: pdfObject?.etag,
-        httpEtag: pdfObject?.httpEtag,
-      });
-
-      if (!pdfObject) {
-        throw new Error(`PDF not found in R2 storage for key: ${key}`);
-      }
-
-      console.log("[NH] Converting R2 object to blob...");
-      const pdfBlob = await pdfObject.blob();
-      console.log("[NH] PDF blob size:", pdfBlob.size);
-
-      const formData = new FormData();
-
-      const displayTitle =
-        data.title.english || data.title.pretty || data.title.japanese || "N/A";
-
-      const cleanTitle = displayTitle
-        .replace(/[^\w\s-]/g, "")
-        .replace(/\s+/g, "_")
-        .toLowerCase();
-      const filename = `${cleanTitle}_${data.id}.pdf`;
-
-      formData.append("document", pdfBlob, filename);
-      formData.append("chat_id", chatId.toString());
-      formData.append("caption", `${displayTitle} (ID: ${data.id})`);
-
-      if (originalMessage.message_thread_id) {
-        formData.append(
-          "message_thread_id",
-          originalMessage.message_thread_id.toString()
-        );
-      }
-
-      const documentResponse = await fetch(
-        `https://api.telegram.org/bot${token}/sendDocument`,
-        {
-          method: "POST",
-          body: formData,
-        }
+    // Handle content based on PDF status
+    if (data.pdf_status === PDFStatusEnum.COMPLETED) {
+      return await handlePDFDownload(
+        token,
+        chatId,
+        data,
+        bucket,
+        originalMessage
       );
-
-      const documentResult =
-        (await documentResponse.json()) as TelegramResponse;
-
-      if (!documentResult.ok) {
-        throw new Error("Failed to send PDF document");
-      }
-
-      const deletePdfLoadingParams: Record<string, any> = {
-        chat_id: chatId,
-        message_id: pdfLoadingMessage.result.message_id,
-      };
-
-      if (originalMessage.message_thread_id) {
-        deletePdfLoadingParams.message_thread_id =
-          originalMessage.message_thread_id;
-      }
-
-      await fetch(apiUrl(token, "deleteMessage", deletePdfLoadingParams));
-
-      console.log(`[NH] Response and PDF sent successfully for ID: ${id}`);
-      return documentResult;
-    } catch (pdfError) {
-      console.error("[NH] PDF Error:", pdfError);
-
-      const errorParams: Record<string, any> = {
-        chat_id: chatId,
-        message_id: pdfLoadingMessage.result.message_id,
-        text: `❌ Failed to download PDF: ${
-          pdfError instanceof Error ? pdfError.message : "Unknown error"
-        }`,
-      };
-
-      if (originalMessage.message_thread_id) {
-        errorParams.message_thread_id = originalMessage.message_thread_id;
-      }
-
-      await fetch(apiUrl(token, "editMessageText", errorParams));
-      return infoResponse;
+    } else {
+      return await handleTelegraphFallback(
+        token,
+        chatId,
+        data,
+        kv,
+        originalMessage
+      );
     }
   } catch (error) {
-    console.error(
-      `[NH] Error:`,
-      error instanceof Error ? error.message : "Unknown error"
+    console.error("[NH] Error:", error);
+    return sendPlainText(
+      token,
+      chatId,
+      `❌ Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      originalMessage
     );
-
-    if (loadingMessage.ok) {
-      const deleteParams: Record<string, any> = {
-        chat_id: chatId,
-        message_id: loadingMessage.result.message_id,
-      };
-
-      if (originalMessage.message_thread_id) {
-        deleteParams.message_thread_id = originalMessage.message_thread_id;
-      }
-
-      await fetch(apiUrl(token, "deleteMessage", deleteParams));
-    }
-
-    const errorText = `Error: ${
-      error instanceof Error ? error.message : "Unknown error"
-    }`;
-
-    return sendPlainText(token, chatId, errorText, originalMessage);
   }
+}
+
+async function handleTelegraphFallback(
+  token: string,
+  chatId: number,
+  data: NHAPIResponse,
+  kv: KVNamespace,
+  originalMessage: Message
+): Promise<TelegramResponse> {
+  // Get or create Telegraph account
+  let account = (await kv.get("telegraph_account", "json")) as TelegraphAccount;
+
+  if (!account) {
+    account = await createTelegraphAccount();
+    await kv.put("telegraph_account", JSON.stringify(account));
+  }
+
+  // Create Telegraph page content
+  const content: Node[] = [
+    {
+      tag: "h4",
+      children: [
+        data.title.english || data.title.pretty || data.title.japanese,
+      ],
+    },
+  ];
+
+  // Add images
+  for (const page of data.images.pages) {
+    content.push({
+      tag: "figure",
+      children: [
+        {
+          tag: "img",
+          attrs: {
+            src: page.url,
+          },
+        },
+      ],
+    });
+  }
+
+  // Create Telegraph page
+  const page = await createTelegraphPage(
+    account.access_token,
+    data.title.english || data.title.pretty || "Untitled",
+    content
+  );
+
+  return sendMarkdownV2Text(
+    token,
+    chatId,
+    `📖 *Read here*: ${escapeMarkdown(page.url)}\n\n` +
+      `ℹ️ PDF is ${
+        data.pdf_status === PDFStatusEnum.PROCESSING
+          ? "still processing"
+          : "not available"
+      }. ` +
+      `Using Telegraph viewer instead.`,
+    originalMessage
+  );
+}
+
+async function createTelegraphAccount(): Promise<TelegraphAccount> {
+  const response = await fetch("https://api.telegra.ph/createAccount", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      short_name: "UMP9Bot",
+      author_name: "UMP9",
+      author_url: "https://t.me/your_bot_username",
+    }),
+  });
+
+  const data = (await response.json()) as {
+    ok: boolean;
+    result?: TelegraphAccount;
+  };
+  if (!data.ok || !data.result) {
+    throw new Error("Failed to create Telegraph account");
+  }
+
+  return data.result;
+}
+
+async function createTelegraphPage(
+  accessToken: string,
+  title: string,
+  content: Node[]
+): Promise<TelegraphPage> {
+  const response = await fetch("https://api.telegra.ph/createPage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      access_token: accessToken,
+      title,
+      content: JSON.stringify(content),
+      return_content: true,
+    }),
+  });
+
+  const data = (await response.json()) as {
+    ok: boolean;
+    result?: TelegraphPage;
+  };
+  if (!data.ok || !data.result) {
+    throw new Error("Failed to create Telegraph page");
+  }
+
+  return data.result;
 }
 
 function escapeMarkdown(text: string): string {
@@ -578,6 +525,120 @@ function apiUrl(
     query = "?" + new URLSearchParams(params).toString();
   }
   return `https://api.telegram.org/bot${token}/${methodName}${query}`;
+}
+
+async function fetchNHData(
+  nhApiUrl: string,
+  id: string
+): Promise<NHAPIResponse> {
+  const response = await fetch(`${nhApiUrl}/get?id=${id}`, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`API request failed with status: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function handlePDFDownload(
+  token: string,
+  chatId: number,
+  data: NHAPIResponse,
+  bucket: R2Bucket,
+  originalMessage: Message
+): Promise<TelegramResponse> {
+  const pdfLoadingMessage = await sendPlainText(
+    token,
+    chatId,
+    "📥 Downloading PDF, please wait...",
+    originalMessage
+  );
+
+  try {
+    if (!data.pdf_url) {
+      throw new Error("PDF URL is not available");
+    }
+
+    const r2Url = new URL(data.pdf_url);
+    const key = r2Url.pathname.slice(1);
+
+    const pdfObject = await bucket.get(key);
+    if (!pdfObject) {
+      throw new Error(`PDF not found in R2 storage`);
+    }
+
+    const pdfBlob = await pdfObject.blob();
+    const formData = new FormData();
+
+    const displayTitle =
+      data.title.english || data.title.pretty || data.title.japanese || "N/A";
+
+    const cleanTitle = displayTitle
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "_")
+      .toLowerCase();
+    const filename = `${cleanTitle}_${data.id}.pdf`;
+
+    formData.append("document", pdfBlob, filename);
+    formData.append("chat_id", chatId.toString());
+    formData.append("caption", `${displayTitle} (ID: ${data.id})`);
+
+    if (originalMessage.message_thread_id) {
+      formData.append(
+        "message_thread_id",
+        originalMessage.message_thread_id.toString()
+      );
+    }
+
+    const documentResponse = await fetch(
+      `https://api.telegram.org/bot${token}/sendDocument`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const documentResult = (await documentResponse.json()) as TelegramResponse;
+
+    if (!documentResult.ok) {
+      throw new Error("Failed to send PDF document");
+    }
+
+    // Clean up loading message
+    await fetch(
+      apiUrl(token, "deleteMessage", {
+        chat_id: chatId,
+        message_id: pdfLoadingMessage.result.message_id,
+        ...(originalMessage.message_thread_id && {
+          message_thread_id: originalMessage.message_thread_id,
+        }),
+      })
+    );
+
+    return documentResult;
+  } catch (error) {
+    console.error("[NH] PDF Error:", error);
+
+    // Update loading message to error
+    await fetch(
+      apiUrl(token, "editMessageText", {
+        chat_id: chatId,
+        message_id: pdfLoadingMessage.result.message_id,
+        text: `❌ Failed to download PDF: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+        ...(originalMessage.message_thread_id && {
+          message_thread_id: originalMessage.message_thread_id,
+        }),
+      })
+    );
+
+    throw error;
+  }
 }
 
 export default app;
