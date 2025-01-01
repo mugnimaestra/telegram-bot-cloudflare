@@ -21,11 +21,23 @@ type Variables = {
 };
 
 const app = new Hono<{
-  Bindings: Env["Bindings"] & {
-    KV: KVNamespace;
+  Bindings: {
+    ENV_BOT_TOKEN: string;
+    ENV_BOT_SECRET: string;
+    BUCKET: R2Bucket;
+    NH_API_URL: string;
   };
   Variables: Variables;
 }>();
+
+// Add bucket check middleware
+app.use("*", async (c, next) => {
+  // Check bucket binding
+  if (!c.env.BUCKET || typeof c.env.BUCKET.get !== "function") {
+    console.error("[Error] R2 Bucket binding is not properly initialized");
+  }
+  await next();
+});
 
 // Store the base URL in context
 app.use("*", async (c, next) => {
@@ -49,6 +61,13 @@ app.post(WEBHOOK, async (c) => {
     console.log(
       `[Webhook] Processing command: ${update.message.text?.split(" ")[0]}`
     );
+
+    // Debug log for bucket
+    console.log("[Webhook] Bucket binding status:", {
+      hasBucket: "BUCKET" in c.env,
+      bucketType: c.env.BUCKET ? typeof c.env.BUCKET : "undefined",
+      bucketKeys: c.env.BUCKET ? Object.keys(c.env.BUCKET) : [],
+    });
 
     // Handle new chat members (bot added to group)
     if (update.message.new_chat_members) {
@@ -74,8 +93,7 @@ app.post(WEBHOOK, async (c) => {
       update.message,
       c.get("baseUrl"),
       c.env.BUCKET,
-      c.env.NH_API_URL,
-      c.env.KV
+      c.env.NH_API_URL
     );
     c.executionCtx.waitUntil(
       messagePromise.then(
@@ -150,13 +168,28 @@ app.get(
   }
 );
 
+// Add Telegraph account and page cache at the top level
+let telegraphAccountCache: TelegraphAccount | null = null;
+const telegraphPageCache: Map<number, string> = new Map();
+
+async function getOrCreateTelegraphAccount(): Promise<TelegraphAccount> {
+  // Return cached account if available
+  if (telegraphAccountCache) {
+    return telegraphAccountCache;
+  }
+
+  // Create new account if no cached account exists
+  const account = await createTelegraphAccount();
+  telegraphAccountCache = account;
+  return account;
+}
+
 async function onMessage(
   token: string,
   message: Message,
   baseUrl: string,
   bucket: R2Bucket,
-  nhApiUrl: string,
-  kv: KVNamespace
+  nhApiUrl: string
 ): Promise<TelegramResponse> {
   if (!message.text) {
     return { ok: false, description: "No text in message" };
@@ -213,8 +246,7 @@ async function onMessage(
       input,
       message,
       bucket,
-      nhApiUrl,
-      kv
+      nhApiUrl
     );
   }
 
@@ -227,6 +259,12 @@ async function onMessage(
 }
 
 async function formatNHResponse(data: NHAPIResponse): Promise<string> {
+  // Validate data structure
+  if (!data || !data.tags || !Array.isArray(data.tags)) {
+    console.error("[NH] Invalid data structure:", data);
+    throw new Error("Invalid API response format");
+  }
+
   const groupedTags = data.tags.reduce((acc, tag) => {
     if (!acc[tag.type]) {
       acc[tag.type] = [];
@@ -235,28 +273,33 @@ async function formatNHResponse(data: NHAPIResponse): Promise<string> {
     return acc;
   }, {} as Record<TagTypeEnum, string[]>);
 
+  // Safely access nested properties
   const title =
-    data.title.english || data.title.pretty || data.title.japanese || "N/A";
+    data.title?.english || data.title?.pretty || data.title?.japanese || "N/A";
   const artists = groupedTags[TagTypeEnum.ARTIST]?.join(", ") || "N/A";
   const tags = groupedTags[TagTypeEnum.TAG]?.join(", ") || "N/A";
   const languages = groupedTags[TagTypeEnum.LANGUAGE]?.join(", ") || "N/A";
   const parody = groupedTags[TagTypeEnum.PARODY]?.join(", ") || "Original";
   const category = groupedTags[TagTypeEnum.CATEGORY]?.join(", ") || "N/A";
 
-  return `📖 *Title*: ${title}
+  return `📖 *Title*: ${escapeMarkdown(title)}
 
 📊 *Info*:
-• ID: ${data.id}
-• Pages: ${data.num_pages}
-• Favorites: ${data.num_favorites}
-• Category: ${category}
-• Parody: ${parody}
-• Language: ${languages}
-• Artist: ${artists}
+• ID: ${data.id || "N/A"}
+• Pages: ${data.num_pages || "N/A"}
+• Favorites: ${data.num_favorites || "N/A"}
+• Category: ${escapeMarkdown(category)}
+• Parody: ${escapeMarkdown(parody)}
+• Language: ${escapeMarkdown(languages)}
+• Artist: ${escapeMarkdown(artists)}
 
-🏷️ *Tags*: ${tags}
+🏷️ *Tags*: ${escapeMarkdown(tags)}
 
-📅 Upload Date: ${new Date(data.upload_date * 1000).toLocaleDateString()}`;
+📅 Upload Date: ${
+    data.upload_date
+      ? new Date(data.upload_date * 1000).toLocaleDateString()
+      : "N/A"
+  }`;
 }
 
 async function fetchWithTimeout(
@@ -309,9 +352,14 @@ async function handleNHCommand(
   input: string,
   originalMessage: Message,
   bucket: R2Bucket,
-  nhApiUrl: string,
-  kv: KVNamespace
+  nhApiUrl: string
 ): Promise<TelegramResponse> {
+  const bucketStatus = {
+    isDefined: !!bucket,
+    hasGetMethod: bucket && typeof bucket.get === "function",
+  };
+  console.log("[NH] Bucket status:", bucketStatus);
+
   const loadingMessage = await sendPlainText(
     token,
     chatId,
@@ -319,10 +367,32 @@ async function handleNHCommand(
     originalMessage
   );
 
+  const deleteLoadingMessage = async () => {
+    try {
+      await fetch(
+        apiUrl(token, "deleteMessage", {
+          chat_id: chatId,
+          message_id: loadingMessage.result.message_id,
+          ...(originalMessage.message_thread_id && {
+            message_thread_id: originalMessage.message_thread_id,
+          }),
+        })
+      );
+    } catch (error) {
+      console.error("[NH] Failed to delete loading message:", error);
+    }
+  };
+
   try {
+    // Clean and validate input
     const id = input.includes("nhentai.net/g/")
       ? input.split("nhentai.net/g/")[1].replace(/\//g, "")
-      : input;
+      : input.replace(/\/nh$/, ""); // Remove trailing /nh if present
+
+    if (!id || !/^\d+$/.test(id)) {
+      await deleteLoadingMessage();
+      throw new Error("Invalid ID format. Please provide a valid numeric ID.");
+    }
 
     console.log(`[NH] Starting fetch for ID: ${id}`);
     const data = await fetchNHData(nhApiUrl, id);
@@ -331,26 +401,39 @@ async function handleNHCommand(
     const formattedResponse = await formatNHResponse(data);
     await sendMarkdownV2Text(token, chatId, formattedResponse, originalMessage);
 
-    // Handle content based on PDF status
-    if (data.pdf_status === PDFStatusEnum.COMPLETED) {
-      return await handlePDFDownload(
-        token,
-        chatId,
-        data,
-        bucket,
-        originalMessage
+    // Delete loading message after sending basic info
+    await deleteLoadingMessage();
+
+    // If bucket is not available or PDF is not completed, use Telegraph without error
+    if (
+      !bucketStatus.hasGetMethod ||
+      data.pdf_status !== PDFStatusEnum.COMPLETED
+    ) {
+      console.log(
+        "[NH] Using Telegraph fallback due to:",
+        !bucketStatus.hasGetMethod
+          ? "bucket not available"
+          : "PDF not completed"
       );
-    } else {
       return await handleTelegraphFallback(
         token,
         chatId,
         data,
-        kv,
         originalMessage
       );
     }
+
+    return await handlePDFDownload(
+      token,
+      chatId,
+      data,
+      bucket,
+      originalMessage
+    );
   } catch (error) {
     console.error("[NH] Error:", error);
+    await deleteLoadingMessage();
+
     return sendPlainText(
       token,
       chatId,
@@ -364,61 +447,93 @@ async function handleTelegraphFallback(
   token: string,
   chatId: number,
   data: NHAPIResponse,
-  kv: KVNamespace,
   originalMessage: Message
 ): Promise<TelegramResponse> {
-  // Get or create Telegraph account
-  let account = (await kv.get("telegraph_account", "json")) as TelegraphAccount;
+  try {
+    // Check if we have a cached page URL for this content
+    const cachedUrl = telegraphPageCache.get(data.id);
+    if (cachedUrl) {
+      console.log("[NH] Using cached Telegraph page URL for ID:", data.id);
+      return sendMarkdownV2Text(
+        token,
+        chatId,
+        `📖 *Read here*: ${escapeMarkdown(cachedUrl)}\n\n` +
+          `ℹ️ PDF is ${
+            data.pdf_status === PDFStatusEnum.PROCESSING
+              ? "still processing"
+              : "not available"
+          }\\. ` +
+          `Using Telegraph viewer instead\\.`,
+        originalMessage
+      );
+    }
 
-  if (!account) {
-    account = await createTelegraphAccount();
-    await kv.put("telegraph_account", JSON.stringify(account));
-  }
+    // Use cached or create new Telegraph account
+    const account = await getOrCreateTelegraphAccount();
 
-  // Create Telegraph page content
-  const content: Node[] = [
-    {
-      tag: "h4",
-      children: [
-        data.title.english || data.title.pretty || data.title.japanese,
-      ],
-    },
-  ];
+    // Create Telegraph page content
+    const content: Node[] = [
+      {
+        tag: "h4",
+        children: [
+          data.title.english || data.title.pretty || data.title.japanese,
+        ],
+      },
+    ];
 
-  // Add images
-  for (const page of data.images.pages) {
-    content.push({
-      tag: "figure",
-      children: [
-        {
-          tag: "img",
-          attrs: {
-            src: page.url,
+    // Add images
+    for (const page of data.images.pages) {
+      content.push({
+        tag: "figure",
+        children: [
+          {
+            tag: "img",
+            attrs: {
+              src: page.url,
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+    }
+
+    // Create Telegraph page
+    const page = await createTelegraphPage(
+      account.access_token,
+      data.title.english || data.title.pretty || "Untitled",
+      content
+    );
+
+    // Cache the page URL
+    telegraphPageCache.set(data.id, page.url);
+    console.log("[NH] Cached Telegraph page URL for ID:", data.id);
+
+    return sendMarkdownV2Text(
+      token,
+      chatId,
+      `📖 *Read here*: ${escapeMarkdown(page.url)}\n\n` +
+        `ℹ️ PDF is ${
+          data.pdf_status === PDFStatusEnum.PROCESSING
+            ? "still processing"
+            : "not available"
+        }\\. ` +
+        `Using Telegraph viewer instead\\.`,
+      originalMessage
+    );
+  } catch (error) {
+    console.error("[NH] Telegraph error:", error);
+    // If there's an error, clear the account cache so we can try with a new account next time
+    if (error instanceof Error && error.message.includes("UNAUTHORIZED")) {
+      telegraphAccountCache = null;
+      // Also clear the page cache since we might need to recreate pages
+      telegraphPageCache.clear();
+    }
+    return sendMarkdownV2Text(
+      token,
+      chatId,
+      `❌ Error: Failed to create Telegraph page`,
+      originalMessage
+    );
   }
-
-  // Create Telegraph page
-  const page = await createTelegraphPage(
-    account.access_token,
-    data.title.english || data.title.pretty || "Untitled",
-    content
-  );
-
-  return sendMarkdownV2Text(
-    token,
-    chatId,
-    `📖 *Read here*: ${escapeMarkdown(page.url)}\n\n` +
-      `ℹ️ PDF is ${
-        data.pdf_status === PDFStatusEnum.PROCESSING
-          ? "still processing"
-          : "not available"
-      }. ` +
-      `Using Telegraph viewer instead.`,
-    originalMessage
-  );
 }
 
 async function createTelegraphAccount(): Promise<TelegraphAccount> {
@@ -531,6 +646,7 @@ async function fetchNHData(
   nhApiUrl: string,
   id: string
 ): Promise<NHAPIResponse> {
+  console.log("[NH] Fetching data from:", `${nhApiUrl}/get?id=${id}`);
   const response = await fetch(`${nhApiUrl}/get?id=${id}`, {
     headers: {
       Accept: "application/json",
@@ -541,7 +657,15 @@ async function fetchNHData(
     throw new Error(`API request failed with status: ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log("[NH] API Response:", data);
+
+  // Validate response structure
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid API response format");
+  }
+
+  return data as NHAPIResponse;
 }
 
 async function handlePDFDownload(
@@ -551,6 +675,15 @@ async function handlePDFDownload(
   bucket: R2Bucket,
   originalMessage: Message
 ): Promise<TelegramResponse> {
+  if (!bucket || typeof bucket.get !== "function") {
+    throw new Error("R2 Bucket is not properly configured");
+  }
+
+  console.log("[NH] PDF Download - Bucket status:", {
+    isDefined: !!bucket,
+    hasGetMethod: bucket && typeof bucket.get === "function",
+  });
+
   const pdfLoadingMessage = await sendPlainText(
     token,
     chatId,
