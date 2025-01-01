@@ -253,9 +253,9 @@ async function formatNHResponse(data: NHAPIResponse): Promise<string> {
 async function fetchWithTimeout(
   url: string,
   options: RequestInit & { timeout?: number } = {},
-  retries = 3
+  retries = 2
 ): Promise<Response> {
-  const { timeout = 30000, ...fetchOptions } = options; // Changed to 30 seconds max
+  const { timeout = 5000, ...fetchOptions } = options;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
@@ -277,12 +277,18 @@ async function fetchWithTimeout(
       console.error(`[NH] Request aborted after ${timeout}ms`);
       if (retries > 0) {
         console.log(`[NH] Retrying... (${retries} retries left)`);
-        // Add exponential backoff
-        const backoffTime = Math.min(1000 * 2 ** (3 - retries), 8000);
+        const backoffTime = Math.min(1000 * retries, 2000);
         await new Promise((resolve) => setTimeout(resolve, backoffTime));
-        return fetchWithTimeout(url, options, retries - 1);
+
+        const newTimeout = Math.min(timeout * 1.2, 8000);
+        const newOptions = {
+          ...options,
+          timeout: newTimeout,
+        };
+
+        return fetchWithTimeout(url, newOptions, retries - 1);
       }
-      throw new Error(`Request failed after ${4 - retries} attempts - timeout`);
+      throw new Error(`Request timed out after ${4 - retries} attempts`);
     }
     throw error;
   }
@@ -299,7 +305,7 @@ async function handleNHCommand(
   const loadingMessage = await sendPlainText(
     token,
     chatId,
-    "🔍 Please wait, fetching data...",
+    "🔍 Fetching data (this might take a few attempts)...",
     originalMessage
   );
 
@@ -314,21 +320,25 @@ async function handleNHCommand(
       headers: {
         Accept: "application/json",
       },
-      timeout: 15000,
+      timeout: 5000,
     }).catch(async (error) => {
-      // Update loading message to show retry status
-      await sendPlainText(
-        token,
-        chatId,
-        `⏳ Request taking longer than expected, retrying...`,
-        originalMessage
-      );
+      if (error.name === "AbortError") {
+        await sendPlainText(
+          token,
+          chatId,
+          "❌ API request failed due to timeout. The free plan has strict time limits. Please try again in a few moments.",
+          originalMessage
+        );
+      } else {
+        await sendPlainText(
+          token,
+          chatId,
+          `❌ Error: ${error.message}`,
+          originalMessage
+        );
+      }
       throw error;
     });
-
-    // Add response time logging
-    const responseTime = Date.now() - startTime;
-    console.log(`Request completed in ${responseTime}ms`);
 
     if (!response.ok) {
       throw new Error(`API request failed with status: ${response.status}`);
@@ -337,7 +347,6 @@ async function handleNHCommand(
     const data = (await response.json()) as NHAPIResponse;
     console.log(`[NH] Data fetched successfully for ID: ${id}`);
 
-    // Delete the loading message
     const deleteParams: Record<string, any> = {
       chat_id: chatId,
       message_id: loadingMessage.result.message_id,
@@ -349,7 +358,6 @@ async function handleNHCommand(
 
     await fetch(apiUrl(token, "deleteMessage", deleteParams));
 
-    // Format and send the info message
     const formattedResponse = await formatNHResponse(data);
     const sendParams: Record<string, any> = {
       chat_id: chatId,
@@ -369,7 +377,6 @@ async function handleNHCommand(
       throw new Error("Failed to send info message to user");
     }
 
-    // Send a temporary message while downloading PDF
     const pdfLoadingMessage = await sendPlainText(
       token,
       chatId,
@@ -378,27 +385,22 @@ async function handleNHCommand(
     );
 
     try {
-      // Extract the key from the R2 URL
       const r2Url = new URL(data.pdf_url);
-      const key = r2Url.pathname.slice(1); // Remove leading slash
+      const key = r2Url.pathname.slice(1);
       console.log(`[NH] PDF URL: ${data.pdf_url}`);
       console.log(`[NH] Extracted R2 key: ${key}`);
 
-      // List objects in bucket to verify access
       console.log("[NH] Listing bucket objects...");
       try {
-        // Try listing with no prefix first to see all objects
         console.log("[NH] Listing all objects in bucket...");
         const allObjects = await bucket.list();
         console.log("[NH] All objects in bucket:", allObjects);
 
-        // Then try with the specific prefix
         const galleryPrefix = key.split("/")[0];
         console.log(`[NH] Listing objects with prefix '${galleryPrefix}'...`);
         const listed = await bucket.list({ prefix: galleryPrefix });
         console.log("[NH] Bucket list result for gallery:", listed);
 
-        // Try to list the specific gallery
         const galleryId = key.split("/")[1];
         console.log(
           `[NH] Listing objects with prefix '${galleryPrefix}/${galleryId}'...`
@@ -411,7 +413,6 @@ async function handleNHCommand(
         console.error("[NH] Error listing bucket:", listError);
       }
 
-      // Get the object directly from R2
       console.log(`[NH] Attempting to get object from R2...`);
       const pdfObject = await bucket.get(key);
 
@@ -426,25 +427,21 @@ async function handleNHCommand(
         throw new Error(`PDF not found in R2 storage for key: ${key}`);
       }
 
-      // Get the PDF data
       console.log("[NH] Converting R2 object to blob...");
       const pdfBlob = await pdfObject.blob();
       console.log("[NH] PDF blob size:", pdfBlob.size);
 
       const formData = new FormData();
 
-      // Get the title with correct priority
       const displayTitle =
         data.title.english || data.title.pretty || data.title.japanese || "N/A";
 
-      // Create a clean filename
       const cleanTitle = displayTitle
-        .replace(/[^\w\s-]/g, "") // Remove special characters
-        .replace(/\s+/g, "_") // Replace spaces with underscores
+        .replace(/[^\w\s-]/g, "")
+        .replace(/\s+/g, "_")
         .toLowerCase();
       const filename = `${cleanTitle}_${data.id}.pdf`;
 
-      // Add caption to the document
       formData.append("document", pdfBlob, filename);
       formData.append("chat_id", chatId.toString());
       formData.append("caption", `${displayTitle} (ID: ${data.id})`);
@@ -456,7 +453,6 @@ async function handleNHCommand(
         );
       }
 
-      // Send PDF as document
       const documentResponse = await fetch(
         `https://api.telegram.org/bot${token}/sendDocument`,
         {
@@ -472,7 +468,6 @@ async function handleNHCommand(
         throw new Error("Failed to send PDF document");
       }
 
-      // Delete the PDF loading message
       const deletePdfLoadingParams: Record<string, any> = {
         chat_id: chatId,
         message_id: pdfLoadingMessage.result.message_id,
@@ -490,7 +485,6 @@ async function handleNHCommand(
     } catch (pdfError) {
       console.error("[NH] PDF Error:", pdfError);
 
-      // Update the loading message to show error
       const errorParams: Record<string, any> = {
         chat_id: chatId,
         message_id: pdfLoadingMessage.result.message_id,
@@ -548,7 +542,6 @@ async function sendPlainText(
     text,
   };
 
-  // If message is from a topic, use the same topic
   if (replyToMessage?.message_thread_id) {
     params.message_thread_id = replyToMessage.message_thread_id;
   }
@@ -568,7 +561,6 @@ async function sendMarkdownV2Text(
     parse_mode: "MarkdownV2",
   };
 
-  // If message is from a topic, use the same topic
   if (replyToMessage?.message_thread_id) {
     params.message_thread_id = replyToMessage.message_thread_id;
   }
