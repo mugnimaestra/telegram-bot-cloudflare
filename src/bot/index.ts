@@ -7,6 +7,7 @@ import type {
   NHAPIResponse,
 } from "@/types/telegram";
 import {
+  PDFStatus,
   PDFStatus as PDFStatusEnum,
   TagType as TagTypeEnum,
 } from "@/types/telegram";
@@ -404,16 +405,23 @@ async function handleNHCommand(
     // Delete loading message after sending basic info
     await deleteLoadingMessage();
 
-    // If bucket is not available or PDF is not completed, use Telegraph without error
-    if (
-      !bucketStatus.hasGetMethod ||
-      data.pdf_status !== PDFStatusEnum.COMPLETED
-    ) {
+    // Debug PDF status and URL
+    console.log("[NH] PDF Status check:", {
+      status: data.pdf_status,
+      statusType: typeof data.pdf_status,
+      expectedStatus: PDFStatusEnum.COMPLETED,
+      isCompleted: data.pdf_status === PDFStatusEnum.COMPLETED,
+      hasPdfUrl: !!data.pdf_url,
+      url: data.pdf_url,
+    });
+
+    // If bucket is not available or PDF URL is not available, use Telegraph
+    if (!bucketStatus.hasGetMethod || !data.pdf_url) {
       console.log(
         "[NH] Using Telegraph fallback due to:",
         !bucketStatus.hasGetMethod
           ? "bucket not available"
-          : "PDF not completed"
+          : "PDF URL not available"
       );
       return await handleTelegraphFallback(
         token,
@@ -423,13 +431,27 @@ async function handleNHCommand(
       );
     }
 
-    return await handlePDFDownload(
-      token,
-      chatId,
-      data,
-      bucket,
-      originalMessage
-    );
+    // Try to get the PDF from R2
+    try {
+      return await handlePDFDownload(
+        token,
+        chatId,
+        data,
+        bucket,
+        originalMessage
+      );
+    } catch (error) {
+      console.log(
+        "[NH] PDF download failed, falling back to Telegraph:",
+        error
+      );
+      return await handleTelegraphFallback(
+        token,
+        chatId,
+        data,
+        originalMessage
+      );
+    }
   } catch (error) {
     console.error("[NH] Error:", error);
     await deleteLoadingMessage();
@@ -454,16 +476,12 @@ async function handleTelegraphFallback(
     const cachedUrl = telegraphPageCache.get(data.id);
     if (cachedUrl) {
       console.log("[NH] Using cached Telegraph page URL for ID:", data.id);
+      const statusMessage = getPDFStatusMessage(data.pdf_status);
       return sendMarkdownV2Text(
         token,
         chatId,
         `📖 *Read here*: ${escapeMarkdown(cachedUrl)}\n\n` +
-          `ℹ️ PDF is ${
-            data.pdf_status === PDFStatusEnum.PROCESSING
-              ? "still processing"
-              : "not available"
-          }\\. ` +
-          `Using Telegraph viewer instead\\.`,
+          `ℹ️ ${statusMessage}`,
         originalMessage
       );
     }
@@ -489,7 +507,7 @@ async function handleTelegraphFallback(
           {
             tag: "img",
             attrs: {
-              src: page.url,
+              src: page.url || "",
             },
           },
         ],
@@ -507,16 +525,11 @@ async function handleTelegraphFallback(
     telegraphPageCache.set(data.id, page.url);
     console.log("[NH] Cached Telegraph page URL for ID:", data.id);
 
+    const statusMessage = getPDFStatusMessage(data.pdf_status);
     return sendMarkdownV2Text(
       token,
       chatId,
-      `📖 *Read here*: ${escapeMarkdown(page.url)}\n\n` +
-        `ℹ️ PDF is ${
-          data.pdf_status === PDFStatusEnum.PROCESSING
-            ? "still processing"
-            : "not available"
-        }\\. ` +
-        `Using Telegraph viewer instead\\.`,
+      `📖 *Read here*: ${escapeMarkdown(page.url)}\n\n` + `ℹ️ ${statusMessage}`,
       originalMessage
     );
   } catch (error) {
@@ -533,6 +546,25 @@ async function handleTelegraphFallback(
       `❌ Error: Failed to create Telegraph page`,
       originalMessage
     );
+  }
+}
+
+function getPDFStatusMessage(status: PDFStatus | undefined): string {
+  switch (status) {
+    case PDFStatusEnum.PROCESSING:
+      return "PDF is being generated\\. Please try again later\\.";
+    case PDFStatusEnum.COMPLETED:
+      return "PDF is ready and available\\.";
+    case PDFStatusEnum.FAILED:
+      return "PDF generation failed\\. Using Telegraph viewer instead\\.";
+    case PDFStatusEnum.UNAVAILABLE:
+      return "PDF service is currently unavailable\\. Using Telegraph viewer instead\\.";
+    case PDFStatusEnum.NOT_REQUESTED:
+      return "PDF generation not yet requested\\. Using Telegraph viewer instead\\.";
+    case PDFStatusEnum.ERROR:
+      return "Error occurred during PDF generation\\. Using Telegraph viewer instead\\.";
+    default:
+      return "PDF is not available\\. Using Telegraph viewer instead\\.";
   }
 }
 
@@ -658,7 +690,7 @@ async function fetchNHData(
   }
 
   const data = await response.json();
-  console.log("[NH] API Response:", data);
+  console.log("[NH] API Response:", JSON.stringify(data, null, 2));
 
   // Validate response structure
   if (!data || typeof data !== "object") {

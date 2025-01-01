@@ -64,6 +64,9 @@ export enum PDFStatus {
   PROCESSING = "processing",
   COMPLETED = "completed",
   FAILED = "failed",
+  UNAVAILABLE = "unavailable",
+  NOT_REQUESTED = "not_requested",
+  ERROR = "error",
 }
 
 export enum TagType {
@@ -103,10 +106,10 @@ export interface NHAPIResponse {
       t: ImageType;
       w: number;
       h: number;
-      thumbnail: string;
-      url: string;
-      cdn_url: string;
-      thumbnail_cdn: string;
+      thumbnail?: string;
+      url?: string;
+      cdn_url?: string;
+      thumbnail_cdn?: string;
     }>;
     cover: {
       t: ImageType;
@@ -130,6 +133,7 @@ export interface NHAPIResponse {
   }>;
   num_pages: number;
   num_favorites: number;
-  pdf_status: PDFStatus;
+  pdf_status?: PDFStatus;
   pdf_url?: string;
+  failed_pages?: number[];
 }
