@@ -10,11 +10,12 @@ A simple and modern Telegram bot implementation running on Cloudflare Workers, b
 │   │   └── server.ts      # API endpoints for URL fetching
 │   ├── bot/
 │   │   └── index.ts       # Main bot logic and command handling
-│   └── types/
-│       ├── env.d.ts       # Environment type definitions
-│       └── telegram.ts    # Telegram API type definitions
+│   ├── types/
+│   │   ├── env.d.ts       # Environment type definitions
+│   │   └── telegram.ts    # Telegram API type definitions
 ├── wrangler.toml          # Cloudflare Workers configuration
-└── package.json          # Project dependencies
+├── package.json          # Project dependencies
+└── .yarnrc.yml          # Yarn configuration
 ```
 
 ## Features
@@ -128,3 +129,25 @@ Response:
 ## License
 
 This project is licensed under the MIT License. 
+
+## Monitoring and Testing
+
+### Testing Timeouts
+To test the URL fetch timeout functionality:
+
+1. Access the Cloudflare Workers logs:
+   ```bash
+   # Using wrangler CLI
+   wrangler tail
+   ```
+   Or use the Cloudflare Dashboard: Workers & Pages > Your Worker > Logs
+
+2. Monitor request patterns:
+   - Success cases: Should complete within the 1-minute timeout
+   - Timeout cases: Requests exceeding 1 minute will be aborted
+   - Error cases: Will show detailed error messages in the logs
+
+The logs will show:
+- Request duration in milliseconds
+- Timeout errors if requests exceed 60 seconds
+- Any other fetch-related errors 

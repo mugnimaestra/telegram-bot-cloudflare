@@ -255,12 +255,16 @@ async function fetchWithTimeout(
   options: RequestInit & { timeout?: number } = {},
   retries = 3
 ): Promise<Response> {
-  const { timeout = 300000, ...fetchOptions } = options; // Default 5 minutes timeout
+  const { timeout = 30000, ...fetchOptions } = options; // Changed to 30 seconds max
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    console.log(`[NH] Request timed out after ${timeout}ms, aborting...`);
+  }, timeout);
 
   try {
+    console.log(`[NH] Attempting fetch (${retries} retries left)`);
     const response = await fetch(url, {
       ...fetchOptions,
       signal: controller.signal,
@@ -270,13 +274,15 @@ async function fetchWithTimeout(
   } catch (error) {
     clearTimeout(timeoutId);
     if (error instanceof Error && error.name === "AbortError") {
+      console.error(`[NH] Request aborted after ${timeout}ms`);
       if (retries > 0) {
-        console.log(
-          `[NH] Request timed out, retrying... (${retries} retries left)`
-        );
+        console.log(`[NH] Retrying... (${retries} retries left)`);
+        // Add exponential backoff
+        const backoffTime = Math.min(1000 * 2 ** (3 - retries), 8000);
+        await new Promise((resolve) => setTimeout(resolve, backoffTime));
         return fetchWithTimeout(url, options, retries - 1);
       }
-      throw new Error("Request timed out after all retries");
+      throw new Error(`Request failed after ${4 - retries} attempts - timeout`);
     }
     throw error;
   }
@@ -290,8 +296,6 @@ async function handleNHCommand(
   bucket: R2Bucket,
   nhApiUrl: string
 ): Promise<TelegramResponse> {
-  console.log(`[NH] Processing request for ID: ${input}`);
-
   const loadingMessage = await sendPlainText(
     token,
     chatId,
@@ -304,15 +308,27 @@ async function handleNHCommand(
       ? input.split("nhentai.net/g/")[1].replace(/\//g, "")
       : input;
 
-    console.log(`[NH] Fetching data for ID: ${id} from ${nhApiUrl}`);
+    console.log(`[NH] Starting fetch for ID: ${id}`);
 
-    // Use fetchWithTimeout instead of regular fetch
     const response = await fetchWithTimeout(`${nhApiUrl}/get?id=${id}`, {
       headers: {
         Accept: "application/json",
       },
-      timeout: 300000, // 5 minutes timeout
+      timeout: 15000,
+    }).catch(async (error) => {
+      // Update loading message to show retry status
+      await sendPlainText(
+        token,
+        chatId,
+        `⏳ Request taking longer than expected, retrying...`,
+        originalMessage
+      );
+      throw error;
     });
+
+    // Add response time logging
+    const responseTime = Date.now() - startTime;
+    console.log(`Request completed in ${responseTime}ms`);
 
     if (!response.ok) {
       throw new Error(`API request failed with status: ${response.status}`);
