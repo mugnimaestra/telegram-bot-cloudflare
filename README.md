@@ -1,153 +1,113 @@
-# Telegram Bot on Cloudflare Workers
+# UMP9 Bot
 
-A simple and modern Telegram bot implementation running on Cloudflare Workers, built with TypeScript and Hono framework.
-
-## Project Structure
-
-```
-├── src/
-│   ├── api/
-│   │   └── server.ts      # API endpoints for URL fetching
-│   ├── bot/
-│   │   └── index.ts       # Main bot logic and command handling
-│   ├── types/
-│   │   ├── env.d.ts       # Environment type definitions
-│   │   └── telegram.ts    # Telegram API type definitions
-├── wrangler.toml          # Cloudflare Workers configuration
-├── package.json          # Project dependencies
-└── .yarnrc.yml          # Yarn configuration
-```
+A Telegram bot for fetching and viewing NH content with PDF generation and Telegraph viewer support. Built with Cloudflare Workers and R2 storage.
 
 ## Features
 
-- **Modern Stack:**
-  - TypeScript for type safety
-  - Hono framework for routing and middleware
-  - Cloudflare Workers for serverless deployment
+- 🚀 Fast and responsive Telegram bot interface
+- 📄 Automatic PDF generation and delivery
+- 📱 Telegraph viewer fallback for quick access
+- ☁️ Cloudflare R2 storage integration
+- 🔄 Automatic retries and error handling
+- 💬 Markdown formatted responses
+- 🌐 Support for both direct IDs and URLs
 
-- **Bot Commands:**
-  - `/start`, `/help` - Show available commands
-  - `/ping` - Test bot connection
-  - `/fetch <url>` - Fetch URL content with browser-like headers
+## Commands
 
-- **API Endpoints:**
-  - `POST /api/fetch_url` - Fetch URL content with browser-like request headers
+- `/help` - Show help message and available commands
+- `/ping` - Check if bot is alive and get a friendly greeting
+- `/nh <id>` - Fetch content and generate PDF/Telegraph viewer
+  - Example: `/nh 546408`
+  - Example: `/nh https://nhentai.net/g/546408/`
 
-## Prerequisites
+## Technical Details
 
-- Node.js 16 or higher
-- npm or yarn
-- A Telegram Bot Token (get from [@BotFather](https://t.me/botfather))
-- Cloudflare account with Workers enabled
+### API Endpoints
 
-## Setup
+- `POST /endpoint` - Main webhook endpoint for Telegram updates
+  - Requires `X-Telegram-Bot-Api-Secret-Token` header for authentication
+- `GET /registerWebhook` - Register bot webhook URL
+- `GET /unRegisterWebhook` - Unregister bot webhook URL
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/mugnimaestra/telegram-bot-cloudflare.git
-   cd telegram-bot-cloudflare
-   ```
+### Environment Variables
 
+Required environment variables:
+- `ENV_BOT_TOKEN` - Telegram Bot API token
+- `ENV_BOT_SECRET` - Webhook secret token
+- `NH_API_URL` - NH API proxy URL
+
+### R2 Storage Configuration
+
+The bot uses Cloudflare R2 for PDF storage. Required bindings:
+- `BUCKET` - R2 bucket binding for PDF storage
+
+### PDF Status Types
+
+- `processing` - PDF is being generated
+- `completed` - PDF is ready and available
+- `failed` - PDF generation failed
+- `unavailable` - R2 storage not configured
+- `not_requested` - PDF generation not requested
+- `error` - Error during gallery processing
+
+## Development
+
+### Prerequisites
+
+- Node.js and npm
+- Wrangler CLI for Cloudflare Workers
+- Telegram Bot token from [@BotFather](https://t.me/BotFather)
+- Cloudflare account with Workers and R2 enabled
+
+### Setup
+
+1. Clone the repository
 2. Install dependencies:
    ```bash
    npm install
    ```
-
-3. Create a KV namespace in Cloudflare Dashboard:
-   - Go to Workers & Pages > KV
-   - Create a new namespace
-   - Copy the namespace ID
-
-4. Configure environment variables:
-   - Create `.dev.vars` for local development:
-     ```
-     ENV_BOT_TOKEN="your_bot_token_here"
-     ENV_BOT_SECRET="your_secret_here"
-     ```
-   - Add the same variables in Cloudflare Dashboard for production
-
-5. Update `wrangler.toml`:
+3. Configure environment variables in `wrangler.toml`:
    ```toml
-   [[kv_namespaces]]
-   binding = "NAMESPACE"
-   id = "your_namespace_id"
-   ```
+   [vars]
+   ENV_BOT_TOKEN = "your_bot_token"
+   ENV_BOT_SECRET = "your_webhook_secret"
+   NH_API_URL = "your_nh_api_url"
 
-6. Deploy to Cloudflare Workers:
+   [[r2_buckets]]
+   binding = "BUCKET"
+   bucket_name = "your_bucket_name"
+   ```
+4. Deploy to Cloudflare Workers:
    ```bash
    npm run deploy
    ```
-
-7. Register the webhook:
-   - Visit `https://your-worker.workers.dev/registerWebhook`
-   - You should see "Ok" if successful
-
-## Local Development
-
-1. Start the development server:
-   ```bash
-   npm run dev
+5. Register webhook:
+   ```
+   Visit: https://your-worker-url/registerWebhook
    ```
 
-2. Use a tool like [ngrok](https://ngrok.com/) to expose your local server:
-   ```bash
-   ngrok http 8787
-   ```
+## Error Handling
 
-3. Register the webhook with your ngrok URL:
-   - Visit `https://your-ngrok-url/registerWebhook`
+The bot includes comprehensive error handling:
+- Automatic retries for failed requests
+- Telegraph viewer fallback when PDF is unavailable
+- Informative error messages for users
+- Debug logging for troubleshooting
 
-## API Documentation
+## Version History
 
-### POST /api/fetch_url
-Fetches content from a URL using browser-like headers to improve compatibility with basic website access.
+### v1.1.0
+- Added PDF generation and delivery
+- Implemented Telegraph viewer fallback
+- Added R2 storage integration
+- Improved error handling and retries
+- Enhanced markdown formatting
 
-Request:
-```json
-{
-  "url": "https://example.com"
-}
-```
-
-Response:
-```json
-{
-  "status": "success",
-  "message": "Successfully fetched: Page Title",
-  "content": "Page content..."
-}
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### v1.0.0
+- Initial release
+- Basic NH content fetching
+- Telegram bot interface
 
 ## License
 
-This project is licensed under the MIT License. 
-
-## Monitoring and Testing
-
-### Testing Timeouts
-To test the URL fetch timeout functionality:
-
-1. Access the Cloudflare Workers logs:
-   ```bash
-   # Using wrangler CLI
-   wrangler tail
-   ```
-   Or use the Cloudflare Dashboard: Workers & Pages > Your Worker > Logs
-
-2. Monitor request patterns:
-   - Success cases: Should complete within the 1-minute timeout
-   - Timeout cases: Requests exceeding 1 minute will be aborted
-   - Error cases: Will show detailed error messages in the logs
-
-The logs will show:
-- Request duration in milliseconds
-- Timeout errors if requests exceed 60 seconds
-- Any other fetch-related errors 
+MIT License - See LICENSE file for details 

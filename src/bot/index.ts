@@ -224,9 +224,14 @@ async function onMessage(
         `\`/help\` \\- Show this message\n` +
         `\`/ping\` \\- Check if bot is alive\n` +
         `\n📚 *NH Commands:*\n` +
-        `\`/nh <id>\` \\- Fetch data from nhapi\n` +
+        `\`/nh <id>\` \\- Fetch data and generate PDF/Telegraph viewer\n` +
         `Example: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`\n\n` +
-        `Bot Version: 1\\.0\\.0`,
+        `*Features:*\n` +
+        `• Automatic PDF generation\n` +
+        `• Telegraph viewer fallback\n` +
+        `• Fast R2 storage delivery\n` +
+        `• Markdown formatted responses\n\n` +
+        `Bot Version: 1\\.1\\.0`,
       message
     );
   }
