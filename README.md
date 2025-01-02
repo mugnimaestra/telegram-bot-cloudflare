@@ -5,11 +5,13 @@ A Telegram bot for fetching and viewing NH content with PDF generation and Teleg
 ## Features
 
 - 🚀 Fast and responsive Telegram bot interface
-- 📄 Automatic PDF generation and delivery
+- 📄 Automatic PDF generation with status tracking
+- 🔄 Interactive status check and download buttons
 - 📱 Telegraph viewer fallback for quick access
 - ☁️ Cloudflare R2 storage integration
 - 🔄 Automatic retries and error handling
 - 💬 Markdown formatted responses
+- 👥 Group chat support
 - 🌐 Support for both direct IDs and URLs
 
 ## Commands
@@ -19,6 +21,14 @@ A Telegram bot for fetching and viewing NH content with PDF generation and Teleg
 - `/nh <id>` - Fetch content and generate PDF/Telegraph viewer
   - Example: `/nh 546408`
   - Example: `/nh https://nhentai.net/g/546408/`
+
+### PDF Features
+
+- Status tracking with interactive buttons
+- Direct PDF download when ready
+- Status check limit (10 times per gallery)
+- Automatic PDF delivery on completion
+- Fallback to Telegraph viewer if needed
 
 ## Technical Details
 
@@ -95,6 +105,14 @@ The bot includes comprehensive error handling:
 - Debug logging for troubleshooting
 
 ## Version History
+
+### v1.2.0
+- Added PDF status tracking with interactive buttons
+- Implemented status check limit system
+- Added direct PDF download button
+- Added group chat support
+- Improved error handling for status checks
+- Enhanced user feedback and notifications
 
 ### v1.1.0
 - Added PDF generation and delivery

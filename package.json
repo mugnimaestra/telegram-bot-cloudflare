@@ -1,6 +1,6 @@
 {
     "name": "telegram-bot-cloudflare",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "description": "A simple Telegram bot implementation using Cloudflare Workers",
     "main": "src/bot/index.ts",
     "scripts": {
