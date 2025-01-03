@@ -15,19 +15,11 @@ export function getPDFKeyboard(
 } {
   const buttons = [];
 
-  // Always add check status button unless completed
-  if (status !== PDFStatus.COMPLETED) {
+  // Only show check status button when processing
+  if (status === PDFStatus.PROCESSING) {
     buttons.push({
       text: "🔄 Check Status",
       callback_data: `check_pdf_status:${galleryId}`,
-    });
-  }
-
-  // Add get PDF button if PDF is ready
-  if (status === PDFStatus.COMPLETED) {
-    buttons.push({
-      text: "📥 Get PDF",
-      callback_data: `get_pdf:${galleryId}`,
     });
   }
 

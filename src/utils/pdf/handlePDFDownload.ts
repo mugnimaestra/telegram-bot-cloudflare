@@ -18,6 +18,10 @@ export async function handlePDFDownload(
     throw new Error("R2 Bucket is not properly configured");
   }
 
+  if (!data.pdf_url) {
+    throw new Error("PDF URL is not available");
+  }
+
   console.log("[NH] PDF Download - Bucket status:", {
     isDefined: !!bucket,
     hasGetMethod: bucket && typeof bucket.get === "function",
@@ -31,10 +35,6 @@ export async function handlePDFDownload(
   );
 
   try {
-    if (!data.pdf_url) {
-      throw new Error("PDF URL is not available");
-    }
-
     const r2Url = new URL(data.pdf_url);
     const key = r2Url.pathname.slice(1);
 

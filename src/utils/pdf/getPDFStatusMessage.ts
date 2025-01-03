@@ -1,9 +1,6 @@
 import { PDFStatus } from "@/types/telegram";
 
 export function getPDFStatusMessage(status: PDFStatus | undefined): string {
-  // Keep only essential status logging
-  console.log("[NH] Processing PDF Status:", status);
-
   switch (status) {
     case PDFStatus.PROCESSING:
       return "PDF is being generated\\. Click the button below to check status\\.";
@@ -18,7 +15,6 @@ export function getPDFStatusMessage(status: PDFStatus | undefined): string {
     case PDFStatus.ERROR:
       return "Error occurred during PDF generation\\. Using Telegraph viewer instead\\.";
     default:
-      console.log("[NH] Unhandled PDF Status:", status);
       return "PDF is not available\\. Using Telegraph viewer instead\\.";
   }
 }
