@@ -25,46 +25,90 @@ export async function handleNHCommand(
   };
   console.log("[NH] Bucket status:", bucketStatus);
 
-  const loadingMessage = await sendPlainText(
-    token,
-    chatId,
-    "🔍 Fetching data...",
-    originalMessage
-  );
-
-  const deleteLoadingMessage = async () => {
-    try {
-      await fetch(
-        apiUrl(token, "deleteMessage", {
-          chat_id: chatId,
-          message_id: loadingMessage.result.message_id,
-          ...(originalMessage.message_thread_id && {
-            message_thread_id: originalMessage.message_thread_id,
-          }),
-        })
-      );
-    } catch (error) {
-      console.error("[NH] Failed to delete loading message:", error);
-    }
-  };
-
+  let loadingMessage: TelegramResponse | null = null;
   try {
+    // Send loading message with timeout handling
+    loadingMessage = await Promise.race([
+      sendPlainText(token, chatId, "🔍 Fetching data...", originalMessage),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Network error or timeout")), 10000)
+      ),
+    ]);
+
+    const deleteLoadingMessage = async () => {
+      if (!loadingMessage?.result?.message_id) return;
+
+      try {
+        await Promise.race([
+          fetch(
+            apiUrl(token, "deleteMessage", {
+              chat_id: chatId,
+              message_id: loadingMessage.result.message_id,
+              ...(originalMessage.message_thread_id && {
+                message_thread_id: originalMessage.message_thread_id,
+              }),
+            })
+          ),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Delete message timeout")), 5000)
+          ),
+        ]);
+      } catch (error) {
+        console.error("[NH] Failed to delete loading message:", error);
+        // Try to update the message instead of deleting if deletion fails
+        try {
+          await fetch(
+            apiUrl(token, "editMessageText", {
+              chat_id: chatId,
+              message_id: loadingMessage.result.message_id,
+              text: "❌ Request failed or timed out. Please try again.",
+              ...(originalMessage.message_thread_id && {
+                message_thread_id: originalMessage.message_thread_id,
+              }),
+            })
+          );
+        } catch (editError) {
+          console.error("[NH] Failed to edit loading message:", editError);
+        }
+      }
+    };
+
     // Clean and validate input
     const id = input.includes("nhentai.net/g/")
       ? input.split("nhentai.net/g/")[1].replace(/\//g, "")
-      : input.replace(/\/nh$/, ""); // Remove trailing /nh if present
+      : input.replace(/\/nh$/, "");
 
     if (!id || !/^\d+$/.test(id)) {
       await deleteLoadingMessage();
-      throw new Error("Invalid ID format. Please provide a valid numeric ID.");
+      throw new Error("Invalid ID format");
     }
 
+    // Fetch data with timeout
     console.log(`[NH] Starting fetch for ID: ${id}`);
-    const data = await fetchNHData(nhApiUrl, id);
+    let data;
+    try {
+      data = await Promise.race([
+        fetchNHData(nhApiUrl, id),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Network error or timeout")), 15000)
+        ),
+      ]);
+    } catch (error) {
+      await deleteLoadingMessage();
+      return {
+        ok: false,
+        description: "Network error or timeout",
+      };
+    }
 
-    // Send metadata message first (without status)
+    // Send metadata message with timeout
     const formattedResponse = await formatNHResponse(data);
-    await sendMarkdownV2Text(token, chatId, formattedResponse, originalMessage);
+    await Promise.race([
+      sendMarkdownV2Text(token, chatId, formattedResponse, originalMessage),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Network error or timeout")), 10000)
+      ),
+    ]);
 
     // Delete loading message
     await deleteLoadingMessage();
@@ -93,12 +137,20 @@ export async function handleNHCommand(
           ? "bucket not available"
           : "PDF URL not available"
       );
-      return await handleTelegraphFallback(
-        token,
-        chatId,
-        { ...data, pdf_status: effectiveStatus },
-        originalMessage
-      );
+      try {
+        return await handleTelegraphFallback(
+          token,
+          chatId,
+          { ...data, pdf_status: effectiveStatus },
+          originalMessage
+        );
+      } catch (error) {
+        return {
+          ok: true,
+          description:
+            "Failed to create Telegraph fallback, but request was processed",
+        };
+      }
     }
 
     // Send PDF status message with keyboard
@@ -128,26 +180,82 @@ export async function handleNHCommand(
           "[NH] PDF download failed, falling back to Telegraph:",
           error
         );
-        return await handleTelegraphFallback(
-          token,
-          chatId,
-          { ...data, pdf_status: PDFStatus.FAILED },
-          originalMessage
-        );
+        try {
+          const fallbackResult = await handleTelegraphFallback(
+            token,
+            chatId,
+            { ...data, pdf_status: PDFStatus.FAILED },
+            originalMessage
+          );
+          return { ...fallbackResult, ok: true };
+        } catch (telegraphError) {
+          console.error("[NH] Telegraph fallback also failed:", telegraphError);
+          return {
+            ok: true,
+            description:
+              "PDF download and Telegraph fallback failed, but request was processed",
+          };
+        }
       }
     }
 
     // Return success response for other cases
     return { ok: true };
   } catch (error) {
-    console.error("[NH] Error:", error);
-    await deleteLoadingMessage();
+    console.error("[NH] Error in handleNHCommand:", error);
 
-    return sendPlainText(
-      token,
-      chatId,
-      `❌ Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      originalMessage
-    );
+    // Always try to clean up loading message in case of any error
+    if (loadingMessage?.result?.message_id) {
+      try {
+        await fetch(
+          apiUrl(token, "editMessageText", {
+            chat_id: chatId,
+            message_id: loadingMessage.result.message_id,
+            text: `❌ Error: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }. Please try again.`,
+            ...(originalMessage.message_thread_id && {
+              message_thread_id: originalMessage.message_thread_id,
+            }),
+          })
+        );
+      } catch (editError) {
+        console.error("[NH] Failed to edit error message:", editError);
+      }
+    }
+
+    // For invalid input format, we want to show a user-friendly message
+    if (
+      error instanceof Error &&
+      (error.message.includes("Invalid ID format") ||
+        !input ||
+        !/^\d+$/.test(input))
+    ) {
+      return {
+        ok: false,
+        description: "Invalid ID format. Please provide a valid numeric ID.",
+      };
+    }
+
+    // Determine if it's a network error
+    const isNetworkError =
+      error instanceof Error &&
+      (error.message.includes("timeout") ||
+        error.message.includes("network") ||
+        error.message.includes("502") ||
+        error.message.includes("failed"));
+
+    if (isNetworkError) {
+      return {
+        ok: false,
+        description: "Network error or timeout. Please try again later.",
+      };
+    }
+
+    // For other errors, return an error response
+    return {
+      ok: false,
+      description: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }

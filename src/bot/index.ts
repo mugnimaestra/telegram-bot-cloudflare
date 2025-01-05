@@ -123,9 +123,6 @@ app.post(WEBHOOK, async (c) => {
           c.env.NH_API_URL
         );
         if (!response.ok) {
-          if (response.description?.includes("Network error")) {
-            return new Response("Internal Server Error", { status: 500 });
-          }
           console.error(
             "[Webhook] Error handling NH command:",
             response.description
@@ -134,13 +131,7 @@ app.post(WEBHOOK, async (c) => {
         return new Response("OK", { status: 200 });
       } catch (error) {
         console.error("[Webhook] Error handling NH command:", error);
-        if (
-          error instanceof Error &&
-          (error.message === "Network error" || error.name === "NetworkError")
-        ) {
-          return new Response("Internal Server Error", { status: 500 });
-        }
-        return new Response("Internal Server Error", { status: 500 });
+        return new Response("OK", { status: 200 });
       }
     } else if (update.message?.text === "/ping") {
       try {
@@ -312,42 +303,53 @@ async function onMessage(
   nhApiUrl: string
 ): Promise<TelegramResponse> {
   try {
-    if (message.text === "/ping") {
-      const hour = new Date().getHours();
-      let greeting = "Hello";
-      if (hour < 12) {
-        greeting = "Good morning";
-      } else if (hour < 18) {
-        greeting = "Good afternoon";
-      } else {
-        greeting = "Good evening";
-      }
-      const response = await sendPlainText(
-        botToken,
-        message.chat.id,
-        `${greeting}! I'm alive and well! 🤖`,
-        message
-      );
-      if (!response.ok && response.description?.includes("Network error")) {
-        throw new Error("Network error");
-      }
-      return response;
-    } else if (message.text === "/start" || message.text === "/help") {
+    if (!message.text) {
+      return { ok: true };
+    }
+
+    if (message.text.startsWith("/start")) {
       const response = await sendMarkdownV2Text(
         botToken,
         message.chat.id,
-        `${
-          message.text === "/start"
-            ? `Hello ${escapeMarkdown(message.from?.first_name || "there")}! `
-            : ""
-        }Welcome to UMP9 Bot 🤖\n\n*Available Commands:*\n\n🔍 *Basic Commands:*\n\`/help\` - Show this message\n\`/ping\` - Check if bot is alive\n\n📚 *NH Commands:*\n\`/nh <id>\` - Fetch data and generate PDF/Telegraph viewer\nExample: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`\n\n*Features:*\n• Automatic PDF generation with status tracking\n• Interactive status check and download buttons\n• Telegraph viewer fallback\n• Fast R2 storage delivery\n• Markdown formatted responses\n• Group chat support\n\n*PDF Features:*\n• Check PDF generation status\n• Download PDF directly when ready\n• Status check limit: ${STATUS_CHECK_LIMIT} times per gallery\n\nBot Version: 1\\.2\\.0`,
+        getHelpMessage(message.from?.first_name || ""),
         message
       );
       if (!response.ok && response.description?.includes("Network error")) {
-        throw new Error("Network error");
+        return {
+          ok: false,
+          description: "Network error. Please try again later.",
+        };
       }
       return response;
-    } else if (message.text?.startsWith("/nh")) {
+    } else if (message.text.startsWith("/help")) {
+      const response = await sendMarkdownV2Text(
+        botToken,
+        message.chat.id,
+        getHelpMessage(),
+        message
+      );
+      if (!response.ok && response.description?.includes("Network error")) {
+        return {
+          ok: false,
+          description: "Network error. Please try again later.",
+        };
+      }
+      return response;
+    } else if (message.text.startsWith("/ping")) {
+      const response = await sendPlainText(
+        botToken,
+        message.chat.id,
+        "Pong!",
+        message
+      );
+      if (!response.ok && response.description?.includes("Network error")) {
+        return {
+          ok: false,
+          description: "Network error. Please try again later.",
+        };
+      }
+      return response;
+    } else if (message.text.startsWith("/nh")) {
       const input = message.text.split(" ")[1];
       if (!input) {
         const response = await sendPlainText(
@@ -357,7 +359,10 @@ async function onMessage(
           message
         );
         if (!response.ok && response.description?.includes("Network error")) {
-          throw new Error("Network error");
+          return {
+            ok: false,
+            description: "Network error. Please try again later.",
+          };
         }
         return response;
       }
@@ -370,7 +375,10 @@ async function onMessage(
         nhApiUrl
       );
       if (!response.ok && response.description?.includes("Network error")) {
-        throw new Error("Network error");
+        return {
+          ok: false,
+          description: "Network error. Please try again later.",
+        };
       }
       return response;
     } else {
@@ -381,16 +389,20 @@ async function onMessage(
         message
       );
       if (!response.ok && response.description?.includes("Network error")) {
-        throw new Error("Network error");
+        return {
+          ok: false,
+          description: "Network error. Please try again later.",
+        };
       }
       return response;
     }
   } catch (error) {
     console.error("[Webhook] Error processing message:", error);
-    if (error instanceof Error && error.message === "Network error") {
-      throw error;
-    }
-    throw new Error("Internal server error");
+    return {
+      ok: false,
+      description:
+        error instanceof Error ? error.message : "Internal server error",
+    };
   }
 }
 
