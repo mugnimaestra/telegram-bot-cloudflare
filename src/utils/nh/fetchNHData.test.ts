@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { fetchNHData } from "./fetchers/fetchNHData";
-import setupNock from "@/utils/test/nock";
+import nock from "@/utils/test/nock";
+import _nock from "nock";
 import type { NHAPIResponse } from "@/types/telegram";
 import { ImageType } from "@/types/telegram";
-import nock from "nock";
 
 describe("fetchNHData", () => {
   const nhApiUrl = "https://api.example.com";
@@ -33,15 +33,15 @@ describe("fetchNHData", () => {
   };
 
   beforeEach(() => {
-    nock.cleanAll();
+    _nock.cleanAll();
   });
 
   afterEach(() => {
-    nock.cleanAll();
+    _nock.cleanAll();
   });
 
   it("should fetch gallery data successfully", async () => {
-    const scope = setupNock(nhApiUrl)
+    const scope = nock(nhApiUrl)
       .get(`/get?id=${galleryId}`)
       .matchHeader("content-type", "application/json")
       .reply(200, mockResponse);
@@ -56,7 +56,7 @@ describe("fetchNHData", () => {
   });
 
   it("should handle API error responses", async () => {
-    const scope = setupNock(nhApiUrl)
+    const scope = nock(nhApiUrl)
       .get(`/get?id=${galleryId}`)
       .matchHeader("content-type", "application/json")
       .reply(404, { error: "Gallery not found" });
@@ -72,7 +72,7 @@ describe("fetchNHData", () => {
   });
 
   it("should handle network errors", async () => {
-    const scope = setupNock(nhApiUrl)
+    const scope = nock(nhApiUrl)
       .get(`/get?id=${galleryId}`)
       .matchHeader("content-type", "application/json")
       .replyWithError("Network error");
@@ -88,7 +88,7 @@ describe("fetchNHData", () => {
   });
 
   it("should handle malformed responses", async () => {
-    const scope = setupNock(nhApiUrl)
+    const scope = nock(nhApiUrl)
       .get(`/get?id=${galleryId}`)
       .matchHeader("content-type", "application/json")
       .reply(200, { invalid: "data" });
@@ -104,7 +104,7 @@ describe("fetchNHData", () => {
   });
 
   it("should send correct headers", async () => {
-    const scope = setupNock(nhApiUrl)
+    const scope = nock(nhApiUrl)
       .get(`/get?id=${galleryId}`)
       .matchHeader("content-type", "application/json")
       .reply(200, mockResponse);

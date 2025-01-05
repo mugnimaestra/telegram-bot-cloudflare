@@ -10,6 +10,7 @@ import { handleTelegraphFallback } from "@/utils/telegraph/handleTelegraphFallba
 import { getPDFStatusMessage } from "@/utils/pdf/getPDFStatusMessage";
 import { getPDFKeyboard } from "@/utils/pdf/getPDFKeyboard";
 import { apiUrl } from "@/utils/telegram/apiUrl";
+import { extractNHId } from "./extractNHId";
 
 export async function handleNHCommand(
   token: string,
@@ -73,12 +74,9 @@ export async function handleNHCommand(
       }
     };
 
-    // Clean and validate input
-    const id = input.includes("nhentai.net/g/")
-      ? input.split("nhentai.net/g/")[1].replace(/\//g, "")
-      : input.replace(/\/nh$/, "");
-
-    if (!id || !/^\d+$/.test(id)) {
+    // Extract and validate ID
+    const id = extractNHId(input);
+    if (!id) {
       await deleteLoadingMessage();
       throw new Error("Invalid ID format");
     }
@@ -225,12 +223,7 @@ export async function handleNHCommand(
     }
 
     // For invalid input format, we want to show a user-friendly message
-    if (
-      error instanceof Error &&
-      (error.message.includes("Invalid ID format") ||
-        !input ||
-        !/^\d+$/.test(input))
-    ) {
+    if (error instanceof Error && error.message.includes("Invalid ID format")) {
       return {
         ok: false,
         description: "Invalid ID format. Please provide a valid numeric ID.",

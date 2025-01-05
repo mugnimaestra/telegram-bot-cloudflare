@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { sendDocument } from "./sendDocument";
-import nock from "nock";
+import _nock from "nock";
+import nock from "@/utils/test/nock";
 
 describe("sendDocument", () => {
   const mockToken = "test_token";
@@ -10,7 +11,7 @@ describe("sendDocument", () => {
   const mockContent = "Test content";
 
   afterEach(() => {
-    nock.cleanAll();
+    _nock.cleanAll();
   });
 
   it("should send document successfully", async () => {

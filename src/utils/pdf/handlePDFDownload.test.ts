@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { handlePDFDownload } from "./handlePDFDownload";
-import nock from "nock";
+import _nock from "nock";
 import { ChatType, ImageType } from "@/types/telegram";
 import type { Message, NHAPIResponse } from "@/types/telegram";
 import type { R2Bucket } from "@cloudflare/workers-types";
+import nock from "../test/nock";
 
 describe("handlePDFDownload", () => {
   const mockToken = "test_token";
@@ -165,7 +166,7 @@ describe("handlePDFDownload", () => {
   });
 
   afterEach(() => {
-    nock.cleanAll();
+    _nock.cleanAll();
     vi.clearAllMocks();
   });
 
@@ -228,7 +229,7 @@ describe("handlePDFDownload", () => {
 
   it("should handle send document error", async () => {
     // Clean up existing sendDocument mocks
-    nock.cleanAll();
+    _nock.cleanAll();
 
     // Re-setup all mocks except sendDocument
     setupNockForTelegramAPI("sendMessage", {

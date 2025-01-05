@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import type { Update } from "@/types/telegram";
 import { ChatType } from "@/types/telegram";
 import type { R2Bucket } from "@cloudflare/workers-types";
-import nock from "nock";
+import _nock from "nock";
+import nock from "@/utils/test/nock";
 
 type Variables = {
   baseUrl: string;
@@ -47,7 +48,7 @@ describe("Bot", () => {
     vi.resetModules();
 
     // Clear all nock interceptors
-    nock.cleanAll();
+    _nock.cleanAll();
 
     // Mock Telegram API endpoints
     const telegramApi = nock("https://api.telegram.org")
@@ -596,7 +597,7 @@ describe("Bot", () => {
     app = botApp;
 
     // Clear existing mocks
-    nock.cleanAll();
+    _nock.cleanAll();
 
     // Mock Telegram API to handle both OPTIONS and POST requests
     nock("https://api.telegram.org")

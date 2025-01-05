@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { handleCallbackQuery, STATUS_CHECK_CACHE } from "./handleCallbackQuery";
 import type { CallbackQuery } from "@/types/telegram";
 import { ChatType, PDFStatus, ImageType, TagType } from "@/types/telegram";
-import nock from "nock";
+import _nock from "nock";
 import { mockFetchPDFStatus } from "./fetchers/__mocks__/fetchPDFStatus";
 import { mockFetchNHData } from "./fetchers/__mocks__/fetchNHData";
 import { mockAnswerCallbackQuery } from "../telegram/fetchers/__mocks__/answerCallbackQuery";
@@ -10,6 +10,7 @@ import { mockEditMessageText } from "../telegram/fetchers/__mocks__/editMessageT
 import { mockSendDocument } from "../telegram/fetchers/__mocks__/sendDocument";
 import { getPDFStatusMessage } from "@/utils/pdf/getPDFStatusMessage";
 import { getPDFKeyboard } from "@/utils/pdf/getPDFKeyboard";
+import nock from "../test/nock";
 
 describe("handleCallbackQuery", () => {
   const mockToken = "test_token";
@@ -59,7 +60,7 @@ describe("handleCallbackQuery", () => {
 
   afterEach(() => {
     // Clean up all nock interceptors
-    nock.cleanAll();
+    _nock.cleanAll();
     // Reset the status check cache
     STATUS_CHECK_CACHE.clear();
   });

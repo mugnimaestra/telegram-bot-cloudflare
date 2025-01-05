@@ -1,7 +1,9 @@
-import nock from "nock";
+import _nock from "nock";
 
-export default function setupNock(baseUrl: string) {
-  const scope = nock(baseUrl);
+export const cleanAll = _nock.cleanAll;
+
+export default function nock(baseUrl: string) {
+  const scope = _nock(baseUrl);
 
   // Handle CORS preflight requests
   scope.options(/.*/).once().reply(204, undefined, {
@@ -23,7 +25,7 @@ export default function setupNock(baseUrl: string) {
 }
 
 export function mockPDFDownload() {
-  return nock("https://example.com")
+  return _nock("https://example.com")
     .options("/test.pdf")
     .once()
     .reply(204, undefined, {
