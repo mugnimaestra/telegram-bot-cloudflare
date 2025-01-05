@@ -1,4 +1,9 @@
+import { fetcher } from "@/utils/fetcher";
 import type { NHAPIResponse } from "@/types/telegram";
+
+export interface FetchNHDataParams {
+  galleryId: string;
+}
 
 function isValidNHAPIResponse(data: any): data is NHAPIResponse {
   return (
@@ -27,21 +32,15 @@ function isValidNHAPIResponse(data: any): data is NHAPIResponse {
 }
 
 export async function fetchNHData(
-  nhApiUrl: string,
-  id: string
+  params: FetchNHDataParams,
+  nhApiUrl: string
 ): Promise<NHAPIResponse> {
-  console.log("[NH] Fetching data for ID:", id);
-  const response = await fetch(`${nhApiUrl}/get?id=${id}`, {
-    headers: {
-      Accept: "application/json",
-    },
+  const data = await fetcher<any>({
+    method: "GET",
+    url: `/get?id=${params.galleryId}`,
+    baseUrl: nhApiUrl,
   });
 
-  if (!response.ok) {
-    throw new Error(`API request failed with status: ${response.status}`);
-  }
-
-  const data = await response.json();
   if (!isValidNHAPIResponse(data)) {
     throw new Error("Invalid data structure");
   }
