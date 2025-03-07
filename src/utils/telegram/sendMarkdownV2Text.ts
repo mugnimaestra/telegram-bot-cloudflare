@@ -19,7 +19,7 @@ export async function sendMarkdownV2Text(
 
   if (replyMarkup) {
     params.reply_markup = JSON.stringify(replyMarkup);
-    console.log("[NH] Sending message with keyboard:", {
+    console.log("[Bot] Sending message with keyboard:", {
       text,
       keyboard: JSON.stringify(replyMarkup, null, 2),
     });
@@ -27,7 +27,7 @@ export async function sendMarkdownV2Text(
 
   // Use POST method instead of GET for messages with keyboards
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  console.log("[NH] Sending request to Telegram:", {
+  console.log("[Bot] Sending request to Telegram:", {
     url,
     method: "POST",
     params: JSON.stringify(params, null, 2),
@@ -42,7 +42,7 @@ export async function sendMarkdownV2Text(
   });
 
   const result = (await response.json()) as TelegramResponse;
-  console.log("[NH] Telegram API response:", result);
+  console.log("[Bot] Telegram API response:", result);
 
   return result;
 }

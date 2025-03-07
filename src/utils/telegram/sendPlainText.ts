@@ -32,7 +32,7 @@ export async function sendPlainText(
     const data = (await response.json()) as TelegramResponse;
     return data;
   } catch (error) {
-    console.error("[NH] Error sending plain text:", error);
+    console.error("[Bot] Error sending plain text:", error);
     if (
       error instanceof Error &&
       (error.message === "Network error" ||

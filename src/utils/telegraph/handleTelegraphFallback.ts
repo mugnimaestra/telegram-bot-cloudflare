@@ -41,7 +41,10 @@ export async function handleTelegraphFallback(
     // Check if we have a cached page URL for this content
     const cachedUrl = telegraphPageCache.get(data.id);
     if (cachedUrl) {
-      console.log("[NH] Using cached Telegraph page URL for ID:", data.id);
+      console.log(
+        "[Telegraph] Using cached Telegraph page URL for ID:",
+        data.id
+      );
       return sendMarkdownV2Text(
         token,
         chatId,
@@ -87,7 +90,7 @@ export async function handleTelegraphFallback(
 
     // Cache the page URL
     telegraphPageCache.set(data.id, page.url);
-    console.log("[NH] Cached Telegraph page URL for ID:", data.id);
+    console.log("[Telegraph] Cached Telegraph page URL for ID:", data.id);
 
     return sendMarkdownV2Text(
       token,
@@ -96,7 +99,7 @@ export async function handleTelegraphFallback(
       originalMessage
     );
   } catch (error) {
-    console.error("[NH] Telegraph error:", error);
+    console.error("[Telegraph] Telegraph error:", error);
     if (error instanceof Error && error.message.includes("UNAUTHORIZED")) {
       telegraphAccountCache = null;
       telegraphPageCache.clear();

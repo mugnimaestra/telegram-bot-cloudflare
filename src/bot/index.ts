@@ -9,6 +9,9 @@ import { sendPlainText } from "@/utils/telegram/sendPlainText";
 import { sendMarkdownV2Text } from "@/utils/telegram/sendMarkdownV2Text";
 import { escapeMarkdown } from "@/utils/telegram/escapeMarkdown";
 import { apiUrl } from "@/utils/telegram/apiUrl";
+import { handleRSCMCommand } from "@/utils/rscm";
+import type { TelegramContext } from "@/utils/rscm/types";
+import { logger } from "@/utils/rscm/logger";
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
@@ -17,8 +20,17 @@ type Variables = {
   baseUrl: string;
 };
 
+// Convert TelegramResponse to Message | boolean
+async function convertResponse(
+  response: TelegramResponse
+): Promise<Message | boolean> {
+  if (!response.ok) return false;
+  if (typeof response.result === "boolean") return response.result;
+  return response.result as Message;
+}
+
 function getHelpMessage(firstName?: string): string {
-  const greeting = firstName ? `Hello ${escapeMarkdown(firstName)}! ` : "";
+  const greeting = firstName ? `Hello ${escapeMarkdown(firstName)}\\! ` : "";
   return `${greeting}Welcome to UMP9 Bot 🤖
 
 *Available Commands:*
@@ -31,6 +43,12 @@ function getHelpMessage(firstName?: string): string {
 \`/nh <id>\` - Fetch data and generate PDF/Telegraph viewer
 Example: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`
 
+🏥 *RSCM Commands:*
+\`/rscm <service>\` - Check RSCM appointment availability
+Available services:
+• \`URJT Geriatri\`
+• \`IPKT Jantung\`
+
 *Features:*
 • Automatic PDF generation with status tracking
 • Interactive status check and download buttons
@@ -38,6 +56,7 @@ Example: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`
 • Fast R2 storage delivery
 • Markdown formatted responses
 • Group chat support
+• Real-time RSCM appointment checking
 
 *PDF Features:*
 • Check PDF generation status
@@ -131,6 +150,65 @@ app.post(WEBHOOK, async (c) => {
         return new Response("OK", { status: 200 });
       } catch (error) {
         console.error("[Webhook] Error handling NH command:", error);
+        return new Response("OK", { status: 200 });
+      }
+    } else if (update.message?.text?.startsWith("/rscm")) {
+      console.log("[Webhook] Processing command: /rscm");
+      try {
+        if (!update.message) {
+          throw new Error("Message is missing");
+        }
+
+        // Store message in constant to ensure TypeScript knows it's defined
+        const message = update.message;
+
+        const ctx: TelegramContext = {
+          message,
+          chat: message.chat,
+          reply: async (text: string, options?: { parse_mode?: string }) =>
+            convertResponse(
+              await sendMarkdownV2Text(
+                c.env.ENV_BOT_TOKEN,
+                message.chat.id,
+                text
+              )
+            ),
+          telegram: {
+            editMessageText: async (
+              chatId: number,
+              messageId: number,
+              inlineMessageId: string | undefined,
+              text: string,
+              options?: { parse_mode?: string }
+            ) =>
+              convertResponse(
+                await fetch(
+                  apiUrl(c.env.ENV_BOT_TOKEN, "editMessageText", {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    text,
+                    parse_mode: options?.parse_mode,
+                  })
+                ).then((res) => res.json())
+              ),
+          },
+        };
+
+        // Set logger production mode based on environment
+        logger.setProduction(c.env.NODE_ENV === "production");
+
+        // Pass environment variables to handleRSCMCommand
+        const rscmEnv = {
+          RSCM_CONFIG: c.env.RSCM_CONFIG,
+          RSCM_API_URL: c.env.RSCM_API_URL,
+          RSCM_CHECK_INTERVAL: c.env.RSCM_CHECK_INTERVAL,
+          RSCM_SERVICES: c.env.RSCM_SERVICES,
+        };
+
+        await handleRSCMCommand(ctx, rscmEnv);
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        console.error("[Webhook] Error handling RSCM command:", error);
         return new Response("OK", { status: 200 });
       }
     } else if (update.message?.text === "/ping") {
@@ -294,116 +372,5 @@ app.get(
     return c.text(r.ok ? "Ok" : JSON.stringify(r, null, 2));
   }
 );
-
-async function onMessage(
-  botToken: string,
-  message: Message,
-  baseUrl: string,
-  bucket: R2Bucket,
-  nhApiUrl: string
-): Promise<TelegramResponse> {
-  try {
-    if (!message.text) {
-      return { ok: true };
-    }
-
-    if (message.text.startsWith("/start")) {
-      const response = await sendMarkdownV2Text(
-        botToken,
-        message.chat.id,
-        getHelpMessage(message.from?.first_name || ""),
-        message
-      );
-      if (!response.ok && response.description?.includes("Network error")) {
-        return {
-          ok: false,
-          description: "Network error. Please try again later.",
-        };
-      }
-      return response;
-    } else if (message.text.startsWith("/help")) {
-      const response = await sendMarkdownV2Text(
-        botToken,
-        message.chat.id,
-        getHelpMessage(),
-        message
-      );
-      if (!response.ok && response.description?.includes("Network error")) {
-        return {
-          ok: false,
-          description: "Network error. Please try again later.",
-        };
-      }
-      return response;
-    } else if (message.text.startsWith("/ping")) {
-      const response = await sendPlainText(
-        botToken,
-        message.chat.id,
-        "Pong!",
-        message
-      );
-      if (!response.ok && response.description?.includes("Network error")) {
-        return {
-          ok: false,
-          description: "Network error. Please try again later.",
-        };
-      }
-      return response;
-    } else if (message.text.startsWith("/nh")) {
-      const input = message.text.split(" ")[1];
-      if (!input) {
-        const response = await sendPlainText(
-          botToken,
-          message.chat.id,
-          "Please provide an ID or URL. Example:\n/nh 546408\n/nh https://nhentai.net/g/546408/",
-          message
-        );
-        if (!response.ok && response.description?.includes("Network error")) {
-          return {
-            ok: false,
-            description: "Network error. Please try again later.",
-          };
-        }
-        return response;
-      }
-      const response = await handleNHCommand(
-        botToken,
-        message.chat.id,
-        input,
-        message,
-        bucket,
-        nhApiUrl
-      );
-      if (!response.ok && response.description?.includes("Network error")) {
-        return {
-          ok: false,
-          description: "Network error. Please try again later.",
-        };
-      }
-      return response;
-    } else {
-      const response = await sendPlainText(
-        botToken,
-        message.chat.id,
-        "Unknown command. Use /help to see available commands.",
-        message
-      );
-      if (!response.ok && response.description?.includes("Network error")) {
-        return {
-          ok: false,
-          description: "Network error. Please try again later.",
-        };
-      }
-      return response;
-    }
-  } catch (error) {
-    console.error("[Webhook] Error processing message:", error);
-    return {
-      ok: false,
-      description:
-        error instanceof Error ? error.message : "Internal server error",
-    };
-  }
-}
 
 export default app;
