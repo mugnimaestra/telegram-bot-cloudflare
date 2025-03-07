@@ -20,7 +20,13 @@ interface Env {
   RSCM_API_URL?: string;
   RSCM_CHECK_INTERVAL?: string;
   RSCM_SERVICES?: string;
+  MAX_RETRIES?: string; // Maximum number of retries for failed requests
 }
+
+// Add retry tracking
+let retryCount = 0;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2 seconds between retries
 
 /**
  * Process command arguments
@@ -50,26 +56,49 @@ async function fetchDateRangeAppointments(
   });
 
   const allSchedules: ConsultationSchedule[] = [];
+  const maxRetries = parseInt(env?.MAX_RETRIES || "") || MAX_RETRIES;
 
   for (const date of dates) {
-    logger.debug("Fetching for date", {
-      service,
-      date: date.toISOString(),
-    });
+    try {
+      logger.debug("Fetching for date", {
+        service,
+        date: date.toISOString(),
+      });
 
-    const schedules = await fetchAppointments(service, date, env);
-    logger.debug("Received schedules", {
-      service,
-      date: date.toISOString(),
-      count: schedules.length,
-      schedules,
-    });
+      const schedules = await fetchAppointments(service, date, env);
+      logger.debug("Received schedules", {
+        service,
+        date: date.toISOString(),
+        count: schedules.length,
+        schedules,
+      });
 
-    allSchedules.push(...schedules);
+      allSchedules.push(...schedules);
 
-    // Small delay between requests to avoid overwhelming the server
-    if (process.env.NODE_ENV !== "test") {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Reset retry count on success
+      retryCount = 0;
+
+      // Small delay between requests to avoid overwhelming the server
+      if (process.env.NODE_ENV !== "test") {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      retryCount++;
+      logger.warn(
+        `Fetch attempt ${retryCount} failed for date ${date.toISOString()}`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+
+      if (retryCount >= maxRetries) {
+        throw new Error(
+          `Failed to fetch appointments after ${maxRetries} attempts`
+        );
+      }
+
+      // Wait before retrying
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
     }
   }
 
@@ -88,7 +117,12 @@ export async function handleRSCMCommand(
   ctx: TelegramContext,
   env?: Env
 ): Promise<void> {
+  let processingMessage: Message | null = null;
+
   try {
+    // Reset retry count at the start of each command
+    retryCount = 0;
+
     // Parse service name from command
     const service = parseCommand(ctx.message.text);
 
@@ -121,13 +155,21 @@ export async function handleRSCMCommand(
     try {
       // Show processing message
       logger.debug("Sending processing message");
-      const processingMessage = (await ctx.reply(
+      processingMessage = (await ctx.reply(
         "🔄 Checking appointments\\.\\.\\. Please wait\\.",
         { parse_mode: "MarkdownV2" }
       )) as Message;
 
-      // Fetch appointments for all dates
-      const schedules = await fetchDateRangeAppointments(service, dates, env);
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Request timed out")), 30000); // 30 second timeout
+      });
+
+      // Fetch appointments with timeout
+      const schedules = (await Promise.race([
+        fetchDateRangeAppointments(service, dates, env),
+        timeoutPromise,
+      ])) as ConsultationSchedule[];
 
       // Find earliest morning appointment
       const earliestMorning = findEarliestMorningAppointment(schedules);
