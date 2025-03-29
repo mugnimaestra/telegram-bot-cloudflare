@@ -15,8 +15,9 @@ import { logger } from "@/utils/rscm/logger";
 import { extractNHId } from "@/utils/nh/extractNHId";
 import { fetchGalleryData } from "@/utils/nh/fetchNHData";
 import { createGalleryTelegraphPage } from "@/utils/telegraph/createGalleryTelegraphPage";
-import { createPdfFromGallery } from "@/utils/pdf/createPdfFromGallery"; // Added for PDF generation
+import { createPdfFromGallery, type PdfProgressCallback, type PdfProgressStatus } from "@/utils/pdf/createPdfFromGallery"; // Added for PDF generation and progress types
 import { sendDocument } from "@/utils/telegram/fetchers/sendDocument"; // Added for sending PDF
+import { editMessageText } from "@/utils/telegram/fetchers/editMessageText"; // Added for editing status messages
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
@@ -283,14 +284,16 @@ app.post(WEBHOOK, async (c) => {
       }
     } else if (update.message?.text?.startsWith("/getpdf")) {
       console.log("[Webhook] Processing command: /getpdf");
+      let statusMessageId: number | null = null; // Variable to store the status message ID
+      const message = update.message; // Ensure message is defined for the scope
+      const chatId = message?.chat?.id;
+      const botToken = c.env.ENV_BOT_TOKEN;
+
       try {
-        if (!update.message) {
-          throw new Error("Message is missing");
+        if (!message || !chatId) {
+          throw new Error("Message or chat ID is missing");
         }
-        const message = update.message;
         const text = message.text;
-        const chatId = message.chat.id;
-        const botToken = c.env.ENV_BOT_TOKEN;
 
         if (!text) {
           console.error("[Webhook] /getpdf command received without text.");
@@ -304,56 +307,135 @@ app.post(WEBHOOK, async (c) => {
           return new Response("OK", { status: 200 });
         }
 
-        // Send initial "Generating PDF..." message
-        const processingMessage = await sendPlainText(botToken, chatId, `⏳ Generating PDF for gallery ${galleryId}... This might take a while.`);
+        // --- Send initial status message and capture ID ---
+        const initialMessageText = `⏳ Initializing PDF generation for gallery ${galleryId}...`;
+        const initialMessageResponse = await sendPlainText(botToken, chatId, initialMessageText);
 
+        // Check if the response is OK and the result is a Message object
+        if (initialMessageResponse.ok && typeof initialMessageResponse.result === 'object' && initialMessageResponse.result !== null && 'message_id' in initialMessageResponse.result) {
+            statusMessageId = initialMessageResponse.result.message_id;
+            console.log(`[Webhook /getpdf] Initial status message sent (ID: ${statusMessageId})`);
+        } else {
+            console.error(`[Webhook /getpdf] Failed to send initial status message or get its ID for gallery ${galleryId}. Response:`, initialMessageResponse);
+            // Proceed without progress updates, or send a final error? For now, proceed.
+            // await sendPlainText(botToken, chatId, `❌ Error: Could not initialize status updates for gallery ${galleryId}.`);
+            // return new Response("OK", { status: 200 });
+        }
+
+        // --- Define Progress Callback ---
+        const onProgress: PdfProgressCallback = async (status: PdfProgressStatus) => {
+            if (!statusMessageId) return; // Don't try to edit if we don't have the ID
+
+            let progressText = initialMessageText; // Default to initial text
+
+            switch (status.type) {
+                case 'downloading':
+                    progressText = `⏳ Downloading image ${status.current}/${status.total} for gallery ${galleryId}...`;
+                    break;
+                case 'embedding':
+                    progressText = `⚙️ Embedding image ${status.current}/${status.total} into PDF for gallery ${galleryId}...`;
+                    break;
+                case 'saving':
+                    progressText = `💾 Saving PDF for gallery ${galleryId}...`;
+                    break;
+                case 'error':
+                    // Keep the last known good status or show a generic error? Let's show the specific error.
+                    // Note: This might overwrite previous progress. Consider appending errors instead.
+                    progressText = `⚠️ Error during PDF generation for ${galleryId}: ${status.error || 'Unknown error'}`;
+                    console.warn(`[Webhook /getpdf Progress Error] Gallery ${galleryId}: ${status.error}`);
+                    break;
+            }
+
+            try {
+                // Avoid editing too frequently if many errors occur rapidly? (Telegram limits apply)
+                // Basic check: only edit if text changes? (Could be added)
+                await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: progressText }, botToken);
+            } catch (editError) {
+                console.error(`[Webhook /getpdf] Failed to edit status message ${statusMessageId} for gallery ${galleryId}:`, editError);
+                // Stop trying to edit if it fails? Maybe disable further updates.
+                statusMessageId = null; // Stop further edits on error
+            }
+        };
+
+        // --- Fetch Gallery Data ---
+        // Edit status before long operation
+        if (statusMessageId) await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: `🔍 Fetching gallery data for ${galleryId}...` }, botToken);
         const galleryData = await fetchGalleryData(galleryId);
 
         if (!galleryData) {
-          await sendPlainText(botToken, chatId, `❌ Error: Failed to fetch gallery data for ID ${galleryId}.`);
+          const errorMsg = `❌ Error: Failed to fetch gallery data for ID ${galleryId}.`;
+          if (statusMessageId) await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: errorMsg }, botToken);
+          else await sendPlainText(botToken, chatId, errorMsg); // Send new message if initial failed
           return new Response("OK", { status: 200 });
         }
 
-        // Create PDF
-        const pdfBytes = await createPdfFromGallery(galleryData.images);
+        // --- Create PDF with Progress ---
+        const pdfBytes = await createPdfFromGallery(galleryData.images, onProgress);
 
         if (!pdfBytes) {
-          await sendPlainText(botToken, chatId, `❌ Error: Failed to generate PDF for gallery ${galleryId}. Some images might be missing or unsupported.`);
+          const errorMsg = `❌ Error: Failed to generate PDF for gallery ${galleryId}. Some images might be missing, unsupported, or generation failed.`;
+          if (statusMessageId) await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: errorMsg }, botToken);
+          else await sendPlainText(botToken, chatId, errorMsg);
           return new Response("OK", { status: 200 });
         }
-
-        // Send PDF document
-        const fileName = `${galleryData.title || galleryId}.pdf`; // Use galleryData.title directly
+        // --- Send PDF Document ---
+        if (statusMessageId) await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: `📤 Sending PDF for gallery ${galleryId}...` }, botToken);
+        const fileName = `${galleryData.title || galleryId}.pdf`;
         const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+        // Corrected: Removed duplicate declaration
         const sendParams = {
-          chat_id: chatId.toString(), // Ensure chat_id is a string
+          chat_id: chatId.toString(),
           document: pdfBlob,
           filename: fileName,
-          // caption: `PDF for ${galleryData.title}`, // Optional caption
-          // message_thread_id: message.message_thread_id?.toString(), // Optional thread ID
+          // caption: `PDF for ${galleryData.title}`, // Optional
+          // reply_to_message_id: message.message_id // Optional: reply to original command
         };
         const sendResult = await sendDocument(sendParams, botToken);
 
+        // --- Final Status Update ---
         if (!sendResult.ok) {
-            console.error(`[Webhook] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}`); // Log status instead of description
-            await sendPlainText(botToken, chatId, `❌ Error: Failed to send the generated PDF for gallery ${galleryId}.`);
+            const errorMsg = `❌ Error: Failed to send the generated PDF for gallery ${galleryId}.`;
+            console.error(`[Webhook /getpdf] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}`);
+            // Corrected editMessageText call
+            if (statusMessageId) await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: errorMsg }, botToken);
+            else await sendPlainText(botToken, chatId, errorMsg); // Send separately if status updates failed
         } else {
-            console.log(`[Webhook] Successfully sent PDF for ${galleryId}`);
-            // Optionally delete the "Generating..." message if needed and possible
-            // if (processingMessage && typeof processingMessage !== 'boolean' && processingMessage.message_id) {
-            //    // await deleteMessage(botToken, chatId, processingMessage.message_id);
-            // }
+            const successMsg = `✅ Successfully sent PDF for gallery ${galleryId} (${fileName}).`;
+            console.log(`[Webhook /getpdf] Successfully sent PDF for ${galleryId}`);
+            if (statusMessageId) {
+                // Option 1: Edit final status
+                // Corrected editMessageText call
+                 await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: successMsg }, botToken);
+                // Option 2: Delete status message (Requires deleteMessage function)
+                // try {
+                //     await deleteMessage(botToken, chatId, statusMessageId);
+                // } catch (deleteError) {
+                //     console.error(`[Webhook /getpdf] Failed to delete status message ${statusMessageId}:`, deleteError);
+                // }
+            }
+            // If status message failed initially, we might want to send the success message anyway
+            // else { await sendPlainText(botToken, chatId, successMsg); }
         }
 
         return new Response("OK", { status: 200 });
-      } catch (error) {
-        console.error("[Webhook] Error handling /getpdf command:", error);
-        // Send generic error message
-        if (update.message?.chat?.id && c.env.ENV_BOT_TOKEN) {
-            await sendPlainText(c.env.ENV_BOT_TOKEN, update.message.chat.id, "An error occurred while processing the /getpdf command.");
+      } catch (error) { // This catch block should be correctly associated with the main try block
+        console.error("[Webhook /getpdf] Unhandled error:", error);
+        const errorMsg = `🆘 An unexpected error occurred while processing the /getpdf command.`;
+        // Try to edit the status message if possible, otherwise send a new message
+        if (statusMessageId && chatId && botToken) {
+            try {
+                // Corrected editMessageText call
+                await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: errorMsg }, botToken);
+            } catch (editError) {
+                console.error("[Webhook /getpdf] Failed to edit final error status message:", editError);
+                // Fallback to sending a new message if editing fails
+                await sendPlainText(botToken, chatId, errorMsg);
+            }
+        } else if (chatId && botToken) {
+            await sendPlainText(botToken, chatId, errorMsg);
         }
         return new Response("OK", { status: 200 }); // Acknowledge receipt even on error
-      }
+      } // This closing brace should correctly end the /getpdf handler's try...catch
     } else if (update.message?.text === "/ping") {
       try {
         await sendPlainText(
