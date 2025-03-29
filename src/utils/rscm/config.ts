@@ -26,24 +26,24 @@ interface Env {
   RSCM_SERVICES?: string;
 }
 
-let configCache: RSCMConfig | null = null;
+// Initialize with a copy of default config instead of null
+let configCache: RSCMConfig = { ...DEFAULT_CONFIG };
 
 /**
- * Load configuration from environment with fallback to defaults
+ * Load configuration from environment with fallback to defaults.
+ * Applies RSCM_CONFIG first, then overrides with individual env vars.
  */
 export function loadConfig(env?: Env): RSCMConfig {
-  // Return cached config if available
-  if (configCache) {
-    return configCache;
-  }
-
   try {
-    // Try to get config from environment variable
+    let baseConfig = { ...DEFAULT_CONFIG }; // Start with defaults
+
+    // Try to merge config from RSCM_CONFIG environment variable
     const envConfig = env?.RSCM_CONFIG;
     if (envConfig) {
       try {
         const userConfig = JSON.parse(envConfig);
-        configCache = {
+        // Merge parsed config with defaults
+        baseConfig = {
           ...DEFAULT_CONFIG,
           ...userConfig,
           services: {
@@ -51,31 +51,41 @@ export function loadConfig(env?: Env): RSCMConfig {
             ...(userConfig.services || {}),
           },
         };
-        return configCache;
       } catch (parseError) {
         console.warn(
-          "Failed to parse RSCM_CONFIG environment variable:",
+          "Failed to parse RSCM_CONFIG environment variable, proceeding with defaults before individual overrides:",
           parseError
+        );
+        // Keep baseConfig as DEFAULT_CONFIG if parse fails
+      }
+    }
+
+    // Apply individual environment variables, overriding baseConfig (defaults or parsed RSCM_CONFIG)
+    configCache = {
+      ...baseConfig, // Start with base config
+      api_url: env?.RSCM_API_URL || baseConfig.api_url,
+      check_interval_seconds: env?.RSCM_CHECK_INTERVAL
+        ? parseInt(env.RSCM_CHECK_INTERVAL, 10)
+        : baseConfig.check_interval_seconds,
+    };
+
+    // Merge services from RSCM_SERVICES if present, overriding existing services
+    if (env?.RSCM_SERVICES) {
+      try {
+        const envServices = JSON.parse(env.RSCM_SERVICES);
+        configCache.services = { ...configCache.services, ...envServices };
+      } catch (serviceParseError) {
+        console.warn(
+          "Failed to parse RSCM_SERVICES environment variable:",
+          serviceParseError
         );
       }
     }
 
-    // Individual environment variables override
-    configCache = {
-      ...DEFAULT_CONFIG,
-      api_url: env?.RSCM_API_URL || DEFAULT_CONFIG.api_url,
-      check_interval_seconds: env?.RSCM_CHECK_INTERVAL
-        ? parseInt(env.RSCM_CHECK_INTERVAL, 10)
-        : DEFAULT_CONFIG.check_interval_seconds,
-      services: {
-        ...DEFAULT_CONFIG.services,
-        ...(env?.RSCM_SERVICES ? JSON.parse(env.RSCM_SERVICES) : {}),
-      },
-    };
     return configCache;
   } catch (error) {
-    console.warn("Error loading config, using defaults:", error);
-    configCache = DEFAULT_CONFIG;
+    console.error("Unexpected error loading RSCM config, resetting to defaults:", error);
+    configCache = { ...DEFAULT_CONFIG }; // Reset to default on unexpected error
     return configCache;
   }
 }

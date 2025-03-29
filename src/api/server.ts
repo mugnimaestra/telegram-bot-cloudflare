@@ -3,13 +3,13 @@ import { cors } from "hono/cors";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 
-const app = new Hono<{ Bindings: Env["Bindings"] }>();
+const app = new Hono<{ Bindings: Env }>();
 
 // Enable CORS
 app.use("/*", cors());
 
 // Root endpoint
-app.get("/", (c: Context<{ Bindings: Env["Bindings"] }>) => {
+app.get("/", (c: Context<{ Bindings: Env }>) => {
   return c.json({
     status: "success",
     service: "UMP9 Bot API",

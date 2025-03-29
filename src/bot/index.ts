@@ -12,6 +12,9 @@ import { apiUrl } from "@/utils/telegram/apiUrl";
 import { handleRSCMCommand } from "@/utils/rscm";
 import type { TelegramContext } from "@/utils/rscm/types";
 import { logger } from "@/utils/rscm/logger";
+import { extractNHId } from "@/utils/nh/extractNHId";
+import { fetchGalleryData } from "@/utils/nh/fetchNHData";
+import { createGalleryTelegraphPage } from "@/utils/telegraph/createGalleryTelegraphPage";
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
@@ -42,6 +45,8 @@ function getHelpMessage(firstName?: string): string {
 📚 *NH Commands:*
 \`/nh <id>\` - Fetch data and generate PDF/Telegraph viewer
 Example: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`
+\`/read <id_or_url>\` - Fetch data and generate Telegraph viewer only
+Example: \`/read 546408\` or \`/read https://nhentai\\.net/g/546408/\`
 
 🏥 *RSCM Commands:*
 \`/rscm <service>\` - Check RSCM appointment availability
@@ -67,12 +72,7 @@ Bot Version: 1\\.2\\.0`;
 }
 
 const app = new Hono<{
-  Bindings: {
-    ENV_BOT_TOKEN: string;
-    ENV_BOT_SECRET: string;
-    BUCKET: R2Bucket;
-    NH_API_URL: string;
-  };
+  Bindings: Env;
   Variables: Variables;
 }>();
 
@@ -211,6 +211,72 @@ app.post(WEBHOOK, async (c) => {
         console.error("[Webhook] Error handling RSCM command:", error);
         return new Response("OK", { status: 200 });
       }
+    } else if (update.message?.text?.startsWith("/read")) {
+      console.log("[Webhook] Processing command: /read");
+      try {
+        if (!update.message) {
+          throw new Error("Message is missing");
+        }
+        const message = update.message; // Ensure message is defined
+        const text = message.text;
+        const chatId = message.chat.id;
+        const botToken = c.env.ENV_BOT_TOKEN;
+
+        if (!text) { // Add check for text
+          console.error("[Webhook] /read command received without text.");
+          return new Response("OK", { status: 200 }); // Or send an error message
+        }
+
+        const galleryId = extractNHId(text.substring(6).trim()); // Remove "/read "
+
+        if (!galleryId) {
+          await sendPlainText(botToken, chatId, "Invalid nhentai URL or gallery ID.");
+          return new Response("OK", { status: 200 });
+        }
+
+        // Send initial "Processing..." message (optional, can be removed if not desired)
+        // const processingMessage = await sendPlainText(botToken, chatId, `Processing gallery ${galleryId}...`);
+
+        const galleryData = await fetchGalleryData(galleryId);
+
+        if (!galleryData) {
+          await sendPlainText(botToken, chatId, "Failed to fetch gallery data.");
+          return new Response("OK", { status: 200 });
+        }
+
+        // Create Telegraph page
+        const telegraphUrl = await createGalleryTelegraphPage(galleryData);
+
+        if (telegraphUrl) {
+          await sendMarkdownV2Text(
+            botToken,
+            chatId,
+            `📖 *Read here*: ${escapeMarkdown(telegraphUrl)}`,
+            message // Pass original message for reply context
+          );
+        } else {
+          await sendPlainText(
+            botToken,
+            chatId,
+            "❌ Error: Failed to create Telegraph page."
+          );
+        }
+
+        // Optionally delete the "Processing..." message if it was sent
+        // if (processingMessage && typeof processingMessage !== 'boolean' && processingMessage.message_id) {
+        //    // TODO: Implement message deletion if desired
+        //    // await deleteMessage(botToken, chatId, processingMessage.message_id);
+        // }
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        console.error("[Webhook] Error handling /read command:", error);
+        // Send generic error message
+        if (update.message?.chat?.id && c.env.ENV_BOT_TOKEN) {
+            await sendPlainText(c.env.ENV_BOT_TOKEN, update.message.chat.id, "An error occurred while processing the /read command.");
+        }
+        return new Response("OK", { status: 200 }); // Acknowledge receipt even on error
+      }
     } else if (update.message?.text === "/ping") {
       try {
         await sendPlainText(
@@ -318,7 +384,7 @@ app.post(WEBHOOK, async (c) => {
 // Register webhook
 app.get(
   "/registerWebhook",
-  async (c: Context<{ Bindings: Env["Bindings"] }>) => {
+  async (c: Context<{ Bindings: Env }>) => {
     const host = c.req.header("host") || "";
     const webhookUrl = `https://${host}${WEBHOOK}`;
 
@@ -356,7 +422,7 @@ app.get(
 // Unregister webhook
 app.get(
   "/unRegisterWebhook",
-  async (c: Context<{ Bindings: Env["Bindings"] }>) => {
+  async (c: Context<{ Bindings: Env }>) => {
     console.log("[Unregister Webhook] Attempting to remove webhook");
 
     const r: TelegramResponse = await (
