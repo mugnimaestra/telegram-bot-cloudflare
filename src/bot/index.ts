@@ -15,6 +15,8 @@ import { logger } from "@/utils/rscm/logger";
 import { extractNHId } from "@/utils/nh/extractNHId";
 import { fetchGalleryData } from "@/utils/nh/fetchNHData";
 import { createGalleryTelegraphPage } from "@/utils/telegraph/createGalleryTelegraphPage";
+import { createPdfFromGallery } from "@/utils/pdf/createPdfFromGallery"; // Added for PDF generation
+import { sendDocument } from "@/utils/telegram/fetchers/sendDocument"; // Added for sending PDF
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
@@ -47,6 +49,8 @@ function getHelpMessage(firstName?: string): string {
 Example: \`/nh 546408\` or \`/nh https://nhentai\\.net/g/546408/\`
 \`/read <id_or_url>\` - Fetch data and generate Telegraph viewer only
 Example: \`/read 546408\` or \`/read https://nhentai\\.net/g/546408/\`
+\`/getpdf <id_or_url>\` - Fetch data and generate a PDF document
+Example: \`/getpdf 546408\` or \`/getpdf https://nhentai\\.net/g/546408/\`
 
 🏥 *RSCM Commands:*
 \`/rscm <service>\` - Check RSCM appointment availability
@@ -274,6 +278,79 @@ app.post(WEBHOOK, async (c) => {
         // Send generic error message
         if (update.message?.chat?.id && c.env.ENV_BOT_TOKEN) {
             await sendPlainText(c.env.ENV_BOT_TOKEN, update.message.chat.id, "An error occurred while processing the /read command.");
+        }
+        return new Response("OK", { status: 200 }); // Acknowledge receipt even on error
+      }
+    } else if (update.message?.text?.startsWith("/getpdf")) {
+      console.log("[Webhook] Processing command: /getpdf");
+      try {
+        if (!update.message) {
+          throw new Error("Message is missing");
+        }
+        const message = update.message;
+        const text = message.text;
+        const chatId = message.chat.id;
+        const botToken = c.env.ENV_BOT_TOKEN;
+
+        if (!text) {
+          console.error("[Webhook] /getpdf command received without text.");
+          return new Response("OK", { status: 200 });
+        }
+
+        const galleryId = extractNHId(text.substring(8).trim()); // Remove "/getpdf "
+
+        if (!galleryId) {
+          await sendPlainText(botToken, chatId, "Invalid nhentai URL or gallery ID.");
+          return new Response("OK", { status: 200 });
+        }
+
+        // Send initial "Generating PDF..." message
+        const processingMessage = await sendPlainText(botToken, chatId, `⏳ Generating PDF for gallery ${galleryId}... This might take a while.`);
+
+        const galleryData = await fetchGalleryData(galleryId);
+
+        if (!galleryData) {
+          await sendPlainText(botToken, chatId, `❌ Error: Failed to fetch gallery data for ID ${galleryId}.`);
+          return new Response("OK", { status: 200 });
+        }
+
+        // Create PDF
+        const pdfBytes = await createPdfFromGallery(galleryData.images);
+
+        if (!pdfBytes) {
+          await sendPlainText(botToken, chatId, `❌ Error: Failed to generate PDF for gallery ${galleryId}. Some images might be missing or unsupported.`);
+          return new Response("OK", { status: 200 });
+        }
+
+        // Send PDF document
+        const fileName = `${galleryData.title || galleryId}.pdf`; // Use galleryData.title directly
+        const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const sendParams = {
+          chat_id: chatId.toString(), // Ensure chat_id is a string
+          document: pdfBlob,
+          filename: fileName,
+          // caption: `PDF for ${galleryData.title}`, // Optional caption
+          // message_thread_id: message.message_thread_id?.toString(), // Optional thread ID
+        };
+        const sendResult = await sendDocument(sendParams, botToken);
+
+        if (!sendResult.ok) {
+            console.error(`[Webhook] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}`); // Log status instead of description
+            await sendPlainText(botToken, chatId, `❌ Error: Failed to send the generated PDF for gallery ${galleryId}.`);
+        } else {
+            console.log(`[Webhook] Successfully sent PDF for ${galleryId}`);
+            // Optionally delete the "Generating..." message if needed and possible
+            // if (processingMessage && typeof processingMessage !== 'boolean' && processingMessage.message_id) {
+            //    // await deleteMessage(botToken, chatId, processingMessage.message_id);
+            // }
+        }
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        console.error("[Webhook] Error handling /getpdf command:", error);
+        // Send generic error message
+        if (update.message?.chat?.id && c.env.ENV_BOT_TOKEN) {
+            await sendPlainText(c.env.ENV_BOT_TOKEN, update.message.chat.id, "An error occurred while processing the /getpdf command.");
         }
         return new Response("OK", { status: 200 }); // Acknowledge receipt even on error
       }
