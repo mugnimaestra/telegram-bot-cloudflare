@@ -739,6 +739,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jsquash/png@npm:^3.0.1":
+  version: 3.0.1
+  resolution: "@jsquash/png@npm:3.0.1"
+  checksum: 10c0/b61a3a30f45c73d2972ff3fe1b358451f012e334e78342b596ee9c3c29a0bbcfb9be96d37894df45198e2aee63b942dff1b12682afeb45080c97e1cff1ad6d8c
+  languageName: node
+  linkType: hard
+
+"@jsquash/webp@npm:^1.4.0":
+  version: 1.4.0
+  resolution: "@jsquash/webp@npm:1.4.0"
+  dependencies:
+    wasm-feature-detect: "npm:^1.2.11"
+  checksum: 10c0/b58ae7591cb4d314d5748a63eacf89cd2d2acd580ceb557a9db7bcb95e54ff3a1fdd823fe50ee0fe56ea6bc591df8ca4f1250d68cea434e9d5bbb5390895d4ad
+  languageName: node
+  linkType: hard
+
 "@npmcli/agent@npm:^3.0.0":
   version: 3.0.0
   resolution: "@npmcli/agent@npm:3.0.0"
@@ -2649,6 +2665,8 @@ __metadata:
   resolution: "telegram-bot-cloudflare@workspace:."
   dependencies:
     "@cloudflare/workers-types": "npm:^4.20231218.0"
+    "@jsquash/png": "npm:^3.0.1"
+    "@jsquash/webp": "npm:^1.4.0"
     "@types/node": "npm:^20.10.5"
     "@vitest/coverage-v8": "npm:^2.1.8"
     "@vitest/ui": "npm:^2.1.8"
@@ -2918,6 +2936,13 @@ __metadata:
   bin:
     vitest: vitest.mjs
   checksum: 10c0/e70631bad5662d6c60c5cf836a4baf58b890db6654fef1f608fe6a86aa49a2b9f078aac74b719d4d3c87c5c781968cc73590a7935277b48f3d8b6fb9c5b4d276
+  languageName: node
+  linkType: hard
+
+"wasm-feature-detect@npm:^1.2.11":
+  version: 1.8.0
+  resolution: "wasm-feature-detect@npm:1.8.0"
+  checksum: 10c0/2cb43e91bbf7aa7c121bc76b3133de3ab6dc4f482acc1d2dc46c528e8adb7a51c72df5c2aacf1d219f113c04efd1706f18274d5790542aa5dd49e0644e3ee665
   languageName: node
   linkType: hard
 

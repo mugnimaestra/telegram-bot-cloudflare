@@ -2,6 +2,32 @@ import { PDFDocument, PDFImage } from 'pdf-lib';
 import type { GalleryData } from '../nh/fetchNHData'; // Assuming GalleryData is exported from here
 import { fetchWithTimeout } from '../nh/fetchWithTimeout'; // Assuming a fetch utility exists
 
+/**
+ * Placeholder function for converting WEBP image buffer to PNG.
+ * NOTE: This needs a real implementation suitable for Cloudflare Workers
+ * (e.g., using WASM, an external API, or Cloudflare Images if available).
+ * @param imageBuffer The ArrayBuffer containing WEBP image data.
+ * @returns A Promise resolving to an ArrayBuffer of PNG data, or null if conversion fails.
+ */
+import { decode as webpDecode } from '@jsquash/webp';
+import { encode as pngEncode } from '@jsquash/png';
+
+async function convertWebpToPng(imageBuffer: ArrayBuffer): Promise<ArrayBuffer | null> {
+  try {
+    console.log("Decoding WEBP image...");
+    const imageData = await webpDecode(imageBuffer);
+    console.log(`WEBP decoded successfully: ${imageData.width}x${imageData.height}`);
+
+    console.log("Encoding image data to PNG...");
+    const pngBuffer = await pngEncode(imageData);
+    console.log("PNG encoding successful.");
+    return pngBuffer;
+  } catch (error) {
+    console.error(`Error during WEBP to PNG conversion: ${error instanceof Error ? error.message : String(error)}`, error);
+    return null; // Indicate conversion failure
+  }
+}
+
 // Define the type for the progress callback status
 export type PdfProgressStatus = {
   type: 'downloading' | 'embedding' | 'saving' | 'error';
@@ -53,17 +79,30 @@ export async function createPdfFromGallery(
 
         try {
             if (format === 'jpg' || format === 'jpeg') {
+                console.log(`[${imageNumber}/${totalImages}] Embedding JPG image...`);
                 embeddedImage = await pdfDoc.embedJpg(imageBuffer);
             } else if (format === 'png') {
+                console.log(`[${imageNumber}/${totalImages}] Embedding PNG image...`);
                 embeddedImage = await pdfDoc.embedPng(imageBuffer);
+            } else if (format === 'webp') {
+                console.log(`[${imageNumber}/${totalImages}] WEBP detected. Attempting conversion to PNG...`);
+                const convertedBuffer = await convertWebpToPng(imageBuffer);
+                if (convertedBuffer) {
+                    console.log(`[${imageNumber}/${totalImages}] WEBP converted to PNG successfully. Embedding PNG...`);
+                    embeddedImage = await pdfDoc.embedPng(convertedBuffer);
+                } else {
+                    console.warn(`[${imageNumber}/${totalImages}] Failed to convert WEBP image ${imageInfo.url}. Skipping.`);
+                    if (onProgress) await onProgress({ type: 'error', error: `Failed to convert WEBP image ${imageNumber}` });
+                    continue; // Skip if conversion fails
+                }
             } else {
                 console.warn(`[${imageNumber}/${totalImages}] Unsupported image format "${format}" for URL: ${imageInfo.url}. Skipping.`);
                 // Optionally report unsupported format as an error or just skip
                 // if (onProgress) await onProgress({ type: 'error', error: `Unsupported format for image ${imageNumber}` });
-                continue; // Skip unsupported formats
+                continue; // Skip other unsupported formats
             }
         } catch (embedError) {
-            const errorMsg = `Failed to embed image ${imageNumber} (${imageInfo.url}): ${embedError instanceof Error ? embedError.message : String(embedError)}`;
+            const errorMsg = `Failed to embed image ${imageNumber} (${imageInfo.url}, format: ${format}): ${embedError instanceof Error ? embedError.message : String(embedError)}`;
             console.error(errorMsg, embedError);
             if (onProgress) await onProgress({ type: 'error', error: errorMsg });
             continue; // Skip if embedding fails
