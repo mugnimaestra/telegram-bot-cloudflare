@@ -1,28 +1,31 @@
 import { PDFDocument, PDFImage } from 'pdf-lib';
-import type { GalleryData } from '../nh/fetchNHData'; // Assuming GalleryData is exported from here
-import { fetchWithTimeout } from '../nh/fetchWithTimeout'; // Assuming a fetch utility exists
+import type { GalleryData } from '../nh/fetchNHData';
+import { fetchWithTimeout } from '../nh/fetchWithTimeout';
 
-/**
- * Placeholder function for converting WEBP image buffer to PNG.
- * NOTE: This needs a real implementation suitable for Cloudflare Workers
- * (e.g., using WASM, an external API, or Cloudflare Images if available).
- * @param imageBuffer The ArrayBuffer containing WEBP image data.
- * @returns A Promise resolving to an ArrayBuffer of PNG data, or null if conversion fails.
- */
+// Revert back to standard imports
 import { decode as webpDecode } from '@jsquash/webp';
 import { encode as pngEncode } from '@jsquash/png';
 
+/**
+ * Converts a WEBP image buffer to PNG using @jsquash libraries.
+ * Relies on the build process correctly bundling the required WASM modules.
+ * @param imageBuffer The ArrayBuffer containing WEBP image data.
+ * @returns A Promise resolving to an ArrayBuffer of PNG data, or null if conversion fails.
+ */
 async function convertWebpToPng(imageBuffer: ArrayBuffer): Promise<ArrayBuffer | null> {
   try {
-    console.log("Decoding WEBP image...");
+    // Standard usage - relies on WASM being available in the environment
+    console.log("Decoding WEBP image using @jsquash/webp...");
     const imageData = await webpDecode(imageBuffer);
     console.log(`WEBP decoded successfully: ${imageData.width}x${imageData.height}`);
 
-    console.log("Encoding image data to PNG...");
+    console.log("Encoding image data to PNG using @jsquash/png...");
     const pngBuffer = await pngEncode(imageData);
     console.log("PNG encoding successful.");
     return pngBuffer;
   } catch (error) {
+    // If WASM isn't bundled/loaded correctly by the CF Worker environment,
+    // errors like "XMLHttpRequest is not defined" or WASM initialization errors might occur here.
     console.error(`Error during WEBP to PNG conversion: ${error instanceof Error ? error.message : String(error)}`, error);
     return null; // Indicate conversion failure
   }

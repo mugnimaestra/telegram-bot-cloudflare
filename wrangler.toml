@@ -23,4 +23,11 @@ id = "c32219ae54c54b308b389c80e77850f7"
 
 [[r2_buckets]]
 binding = "BUCKET"
-bucket_name = "nhapiod-proxy" 
+bucket_name = "nhapiod-proxy"
+
++[build]
++command = "" # No custom build command needed if just using esbuild defaults
++upload.format = "modules" # Ensure module format for WASM imports
++[[build.rules]]
++globs = ["**/*.wasm"]
++type = "CompiledWasm"
