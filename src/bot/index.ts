@@ -418,24 +418,138 @@ app.post(WEBHOOK, async (c) => {
         }
 
         return new Response("OK", { status: 200 });
-      } catch (error) { // This catch block should be correctly associated with the main try block
-        console.error("[Webhook /getpdf] Unhandled error:", error);
-        const errorMsg = `🆘 An unexpected error occurred while processing the /getpdf command.`;
-        // Try to edit the status message if possible, otherwise send a new message
-        if (statusMessageId && chatId && botToken) {
+      } catch (error) { // This catch block now only handles errors *before* waitUntil
+        console.error("[Webhook /getpdf] Initial processing error:", error);
+        const errorMsg = `🆘 An unexpected error occurred before starting PDF generation.`;
+        // Attempt to send an error message if possible
+        if (chatId && botToken) {
             try {
-                // Corrected editMessageText call
-                await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: errorMsg }, botToken);
-            } catch (editError) {
-                console.error("[Webhook /getpdf] Failed to edit final error status message:", editError);
-                // Fallback to sending a new message if editing fails
-                await sendPlainText(botToken, chatId, errorMsg);
+                // If we have a status message ID, try editing it
+                if (statusMessageId) {
+                    await editMessageText({ chat_id: chatId, message_id: statusMessageId, text: errorMsg }, botToken);
+                } else {
+                    // Otherwise, send a new message
+                    await sendPlainText(botToken, chatId, errorMsg);
+                }
+            } catch (sendError) {
+                console.error("[Webhook /getpdf] Failed to send initial processing error message:", sendError);
             }
-        } else if (chatId && botToken) {
-            await sendPlainText(botToken, chatId, errorMsg);
         }
-        return new Response("OK", { status: 200 }); // Acknowledge receipt even on error
-      } // This closing brace should correctly end the /getpdf handler's try...catch
+        // Still acknowledge receipt to Telegram
+        return new Response("OK", { status: 200 });
+      }
+
+      // --- Define the Asynchronous Task ---
+      const generateAndSendPdfTask = async () => {
+          let taskStatusMessageId = statusMessageId; // Use a local copy for the async task
+
+          try {
+              // --- Fetch Gallery Data ---
+              if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: `🔍 Fetching gallery data for ${galleryId}...` }, botToken);
+              // Pass NH_API_URL from env
+              const galleryData = await fetchGalleryData(galleryId, c.env.NH_API_URL);
+
+              if (!galleryData) {
+                const errorMsg = `❌ Error: Failed to fetch gallery data for ID ${galleryId}.`;
+                if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
+                else await sendPlainText(botToken, chatId, errorMsg); // Send new message if initial failed
+                return; // Stop the async task
+              }
+
+              // --- Define Progress Callback ---
+              const onProgress: PdfProgressCallback = async (status: PdfProgressStatus) => {
+                  if (!taskStatusMessageId) return; // Don't try to edit if we don't have the ID
+
+                  let progressText = `⏳ Initializing PDF generation for gallery ${galleryId}...`; // Default text
+
+                  switch (status.type) {
+                      case 'downloading':
+                          progressText = `⏳ Downloading image ${status.current}/${status.total} for gallery ${galleryId}...`;
+                          break;
+                      case 'embedding':
+                          progressText = `⚙️ Embedding image ${status.current}/${status.total} into PDF for gallery ${galleryId}...`;
+                          break;
+                      case 'saving':
+                          progressText = `💾 Saving PDF for gallery ${galleryId}...`;
+                          break;
+                      case 'error':
+                          progressText = `⚠️ Error during PDF generation for ${galleryId}: ${status.error || 'Unknown error'}`;
+                          console.warn(`[Webhook /getpdf Task Progress Error] Gallery ${galleryId}: ${status.error}`);
+                          break;
+                  }
+
+                  try {
+                      await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: progressText }, botToken);
+                  } catch (editError) {
+                      console.error(`[Webhook /getpdf Task] Failed to edit status message ${taskStatusMessageId} for gallery ${galleryId}:`, editError);
+                      taskStatusMessageId = null; // Stop further edits on error
+                  }
+              };
+
+              // --- Create PDF with Progress ---
+              const pdfBytes = await createPdfFromGallery(galleryData.images, onProgress);
+
+              if (!pdfBytes) {
+                const errorMsg = `❌ Error: Failed to generate PDF for gallery ${galleryId}. Some images might be missing, unsupported, or generation failed.`;
+                if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
+                else await sendPlainText(botToken, chatId, errorMsg);
+                return; // Stop the async task
+              }
+
+              // --- Send PDF Document ---
+              if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: `📤 Sending PDF for gallery ${galleryId}...` }, botToken);
+              const fileName = `${galleryData.title || galleryId}.pdf`;
+              const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+              const sendParams = {
+                chat_id: chatId.toString(),
+                document: pdfBlob,
+                filename: fileName,
+                // caption: `PDF for ${galleryData.title}`, // Optional
+                // reply_to_message_id: message.message_id // Optional: reply to original command
+              };
+              const sendResult = await sendDocument(sendParams, botToken);
+
+              // --- Final Status Update ---
+              if (!sendResult.ok) {
+                  const errorMsg = `❌ Error: Failed to send the generated PDF for gallery ${galleryId}. Description: ${sendResult.description || 'Unknown Telegram API error'}`;
+                  console.error(`[Webhook /getpdf Task] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}, Description: ${sendResult.description}`);
+                  if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
+                  else await sendPlainText(botToken, chatId, errorMsg); // Send separately if status updates failed
+              } else {
+                  const successMsg = `✅ Successfully sent PDF for gallery ${galleryId} (${fileName}).`;
+                  console.log(`[Webhook /getpdf Task] Successfully sent PDF for ${galleryId}`);
+                  if (taskStatusMessageId) {
+                       await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: successMsg }, botToken);
+                      // Optionally delete the status message here instead of editing
+                  }
+                  // If status message failed initially, we might want to send the success message anyway
+                  // else { await sendPlainText(botToken, chatId, successMsg); }
+              }
+
+          } catch (taskError) { // Catch errors within the async task
+              console.error("[Webhook /getpdf Task] Unhandled error:", taskError);
+              const errorMsg = `🆘 An unexpected error occurred during PDF generation for gallery ${galleryId}.`;
+              // Try to edit the status message if possible, otherwise log (avoid sending new message from background task on generic error)
+              if (taskStatusMessageId && chatId && botToken) {
+                  try {
+                      await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
+                  } catch (editError) {
+                      console.error("[Webhook /getpdf Task] Failed to edit final error status message:", editError);
+                  }
+              }
+              // Avoid sending a new message here for unhandled errors in background
+              // else if (chatId && botToken) {
+              //     await sendPlainText(botToken, chatId, errorMsg);
+              // }
+          }
+      };
+
+      // --- Schedule the task to run after the response ---
+      c.executionCtx.waitUntil(generateAndSendPdfTask());
+
+      // --- Return immediate response to Telegram ---
+      return new Response("OK", { status: 200 });
+
     } else if (update.message?.text === "/ping") {
       try {
         await sendPlainText(
