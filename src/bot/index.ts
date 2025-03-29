@@ -440,14 +440,29 @@ app.post(WEBHOOK, async (c) => {
       }
 
       // --- Define the Asynchronous Task ---
-      const generateAndSendPdfTask = async () => {
-          let taskStatusMessageId = statusMessageId; // Use a local copy for the async task
-
-          try {
-              // --- Fetch Gallery Data ---
-              if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: `🔍 Fetching gallery data for ${galleryId}...` }, botToken);
-              // Pass NH_API_URL from env
-              const galleryData = await fetchGalleryData(galleryId, c.env.NH_API_URL);
+            const generateAndSendPdfTask = async () => {
+                let taskStatusMessageId = statusMessageId; // Use a local copy for the async task
+                
+                // Safely extract gallery ID
+                if (!message?.text) {
+                    const errorMsg = "Message text is missing in async task.";
+                    if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
+                    return;
+                }
+                
+                const galleryId = extractNHId(message.text.substring(8).trim()); // Get gallery ID in task scope
+                
+                if (!galleryId) {
+                    const errorMsg = "Invalid gallery ID in async task.";
+                    if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
+                    return;
+                }
+      
+                try {
+                    // --- Fetch Gallery Data ---
+                    if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: `🔍 Fetching gallery data for ${galleryId}...` }, botToken);
+                    // Pass NH_API_URL from env
+                    const galleryData = await fetchGalleryData(galleryId);
 
               if (!galleryData) {
                 const errorMsg = `❌ Error: Failed to fetch gallery data for ID ${galleryId}.`;
@@ -511,8 +526,8 @@ app.post(WEBHOOK, async (c) => {
 
               // --- Final Status Update ---
               if (!sendResult.ok) {
-                  const errorMsg = `❌ Error: Failed to send the generated PDF for gallery ${galleryId}. Description: ${sendResult.description || 'Unknown Telegram API error'}`;
-                  console.error(`[Webhook /getpdf Task] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}, Description: ${sendResult.description}`);
+                  const errorMsg = `❌ Error: Failed to send the generated PDF for gallery ${galleryId}. The file may be too large or invalid.`;
+                  console.error(`[Webhook /getpdf Task] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}`);
                   if (taskStatusMessageId) await editMessageText({ chat_id: chatId, message_id: taskStatusMessageId, text: errorMsg }, botToken);
                   else await sendPlainText(botToken, chatId, errorMsg); // Send separately if status updates failed
               } else {
