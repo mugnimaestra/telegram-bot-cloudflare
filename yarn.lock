@@ -958,6 +958,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/pako@npm:^2.0.3":
+  version: 2.0.3
+  resolution: "@types/pako@npm:2.0.3"
+  checksum: 10c0/45119ac3c4e8a77317c35493327039b74e333562f06ce038048228918d8ddfaa7958125aab960d1565b3861046022754c414dba1eecb210c44a32c415956bee2
+  languageName: node
+  linkType: hard
+
 "@vitest/coverage-v8@npm:^2.1.8":
   version: 2.1.8
   resolution: "@vitest/coverage-v8@npm:2.1.8"
@@ -1583,6 +1590,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fast-png@npm:^6.3.0":
+  version: 6.3.0
+  resolution: "fast-png@npm:6.3.0"
+  dependencies:
+    "@types/pako": "npm:^2.0.3"
+    iobuffer: "npm:^5.3.2"
+    pako: "npm:^2.1.0"
+  checksum: 10c0/6c7daaa71769126dbd9182ef56e22606b9094ac3235274d538d5a53e3cd404fd0967208994665e36d82f2d3bf1789f2d5af033c597a113d98e08d5cfb84d83a1
+  languageName: node
+  linkType: hard
+
 "fdir@npm:^6.4.2":
   version: 6.4.2
   resolution: "fdir@npm:6.4.2"
@@ -1758,6 +1776,13 @@ __metadata:
   version: 0.1.4
   resolution: "imurmurhash@npm:0.1.4"
   checksum: 10c0/8b51313850dd33605c6c9d3fd9638b714f4c4c40250cff658209f30d40da60f78992fb2df5dabee4acf589a6a82bbc79ad5486550754bd9ec4e3fc0d4a57d6a6
+  languageName: node
+  linkType: hard
+
+"iobuffer@npm:^5.3.2":
+  version: 5.4.0
+  resolution: "iobuffer@npm:5.4.0"
+  checksum: 10c0/1b3f9a5ea158bc63f038b374b42832acdb9db13ea9cfa4ed78723f30894986442f6c033dff4ae2fdf34724bf0fe432e3b86c11ca82049568c58b8d7fb47a6ac2
   languageName: node
   linkType: hard
 
@@ -2158,6 +2183,13 @@ __metadata:
   version: 1.0.11
   resolution: "pako@npm:1.0.11"
   checksum: 10c0/86dd99d8b34c3930345b8bbeb5e1cd8a05f608eeb40967b293f72fe469d0e9c88b783a8777e4cc7dc7c91ce54c5e93d88ff4b4f060e6ff18408fd21030d9ffbe
+  languageName: node
+  linkType: hard
+
+"pako@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "pako@npm:2.1.0"
+  checksum: 10c0/8e8646581410654b50eb22a5dfd71159cae98145bd5086c9a7a816ec0370b5f72b4648d08674624b3870a521e6a3daffd6c2f7bc00fdefc7063c9d8232ff5116
   languageName: node
   linkType: hard
 
@@ -2670,12 +2702,14 @@ __metadata:
     "@types/node": "npm:^20.10.5"
     "@vitest/coverage-v8": "npm:^2.1.8"
     "@vitest/ui": "npm:^2.1.8"
+    fast-png: "npm:^6.3.0"
     happy-dom: "npm:^16.3.0"
     hono: "npm:^4.6.14"
     nock: "npm:^13.5.6"
     pdf-lib: "npm:^1.17.1"
     typescript: "npm:^5.3.3"
     vitest: "npm:^2.1.8"
+    wasm-webp: "npm:^0.0.2"
     wrangler: "npm:4.6.0"
   languageName: unknown
   linkType: soft
@@ -2943,6 +2977,13 @@ __metadata:
   version: 1.8.0
   resolution: "wasm-feature-detect@npm:1.8.0"
   checksum: 10c0/2cb43e91bbf7aa7c121bc76b3133de3ab6dc4f482acc1d2dc46c528e8adb7a51c72df5c2aacf1d219f113c04efd1706f18274d5790542aa5dd49e0644e3ee665
+  languageName: node
+  linkType: hard
+
+"wasm-webp@npm:^0.0.2":
+  version: 0.0.2
+  resolution: "wasm-webp@npm:0.0.2"
+  checksum: 10c0/87d26c918ddd1092f30bdce297f2d7a0df527b3a5df66f43b0a74e3b8c0f36bb7eeae6e2e854c94c183c8cfd42c75ed7b4f325001df7da21731d89b05da52be0
   languageName: node
   linkType: hard
 

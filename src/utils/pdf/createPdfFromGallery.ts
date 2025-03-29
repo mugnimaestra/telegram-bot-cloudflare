@@ -1,33 +1,48 @@
 import { PDFDocument, PDFImage } from 'pdf-lib';
+import webpDecode, { init as initWebpDecode } from '@jsquash/webp/decode.js';
+import pngEncode, { init as initPngEncode } from '@jsquash/png/encode.js';
 import type { GalleryData } from '../nh/fetchNHData';
 import { fetchWithTimeout } from '../nh/fetchWithTimeout';
 
-// Revert back to standard imports
-import { decode as webpDecode } from '@jsquash/webp';
-import { encode as pngEncode } from '@jsquash/png';
+// Initialize WASM modules
+(async () => {
+  try {
+    const [webpDecodeWasm, pngEncodeWasm] = await Promise.all([
+      fetch(new URL('@jsquash/webp/codec/dec/webp_dec.wasm', import.meta.url))
+        .then(res => res.arrayBuffer()),
+      fetch(new URL('@jsquash/png/codec/pkg/squoosh_png_bg.wasm', import.meta.url))
+        .then(res => res.arrayBuffer())
+    ]);
+
+    await Promise.all([
+      initWebpDecode(webpDecodeWasm),
+      initPngEncode(pngEncodeWasm)
+    ]);
+    console.log('WASM modules initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize WASM modules:', error);
+  }
+})();
 
 /**
- * Converts a WEBP image buffer to PNG using @jsquash libraries.
- * Relies on the build process correctly bundling the required WASM modules.
+ * Converts a WEBP image buffer to PNG using @jsquash/webp and @jsquash/png.
  * @param imageBuffer The ArrayBuffer containing WEBP image data.
  * @returns A Promise resolving to an ArrayBuffer of PNG data, or null if conversion fails.
  */
 async function convertWebpToPng(imageBuffer: ArrayBuffer): Promise<ArrayBuffer | null> {
   try {
-    // Standard usage - relies on WASM being available in the environment
-    console.log("Decoding WEBP image using @jsquash/webp...");
+    console.log("Attempting WEBP decoding...");
     const imageData = await webpDecode(imageBuffer);
     console.log(`WEBP decoded successfully: ${imageData.width}x${imageData.height}`);
 
-    console.log("Encoding image data to PNG using @jsquash/png...");
+    console.log("Attempting PNG encoding...");
     const pngBuffer = await pngEncode(imageData);
-    console.log("PNG encoding successful.");
+    console.log("PNG encoded successfully.");
+    
     return pngBuffer;
   } catch (error) {
-    // If WASM isn't bundled/loaded correctly by the CF Worker environment,
-    // errors like "XMLHttpRequest is not defined" or WASM initialization errors might occur here.
-    console.error(`Error during WEBP to PNG conversion: ${error instanceof Error ? error.message : String(error)}`, error);
-    return null; // Indicate conversion failure
+    console.error('WEBP to PNG conversion failed:', error instanceof Error ? error.message : String(error));
+    return null;
   }
 }
 
@@ -41,7 +56,6 @@ export type PdfProgressStatus = {
 
 // Define the type for the progress callback function
 export type PdfProgressCallback = (status: PdfProgressStatus) => Promise<void>;
-
 
 /**
  * Creates a PDF document from a gallery's images, processing a maximum of 49 images.
@@ -96,25 +110,22 @@ export async function createPdfFromGallery(
                 } else {
                     console.warn(`[${imageNumber}/${totalImages}] Failed to convert WEBP image ${imageInfo.url}. Skipping.`);
                     if (onProgress) await onProgress({ type: 'error', error: `Failed to convert WEBP image ${imageNumber}` });
-                    continue; // Skip if conversion fails
+                    continue;
                 }
             } else {
                 console.warn(`[${imageNumber}/${totalImages}] Unsupported image format "${format}" for URL: ${imageInfo.url}. Skipping.`);
-                // Optionally report unsupported format as an error or just skip
-                // if (onProgress) await onProgress({ type: 'error', error: `Unsupported format for image ${imageNumber}` });
-                continue; // Skip other unsupported formats
+                continue;
             }
         } catch (embedError) {
             const errorMsg = `Failed to embed image ${imageNumber} (${imageInfo.url}, format: ${format}): ${embedError instanceof Error ? embedError.message : String(embedError)}`;
             console.error(errorMsg, embedError);
             if (onProgress) await onProgress({ type: 'error', error: errorMsg });
-            continue; // Skip if embedding fails
+            continue;
         }
 
-
         if (embeddedImage) {
-          const { width, height } = embeddedImage.scale(1); // Get original dimensions
-          const page = pdfDoc.addPage([width, height]); // Create page with image dimensions
+          const { width, height } = embeddedImage.scale(1);
+          const page = pdfDoc.addPage([width, height]);
 
           page.drawImage(embeddedImage, {
             x: 0,
@@ -123,14 +134,12 @@ export async function createPdfFromGallery(
             height: height,
           });
           console.log(`[${imageNumber}/${totalImages}] Added image ${imageInfo.url} to PDF.`);
-          // Report embedding success
           if (onProgress) await onProgress({ type: 'embedding', current: imageNumber, total: totalImages });
         }
       } catch (fetchError) {
          const errorMsg = `Error processing image ${imageNumber} (${imageInfo.url}): ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`;
          console.error(errorMsg, fetchError);
          if (onProgress) await onProgress({ type: 'error', error: errorMsg });
-        // Continue to the next image even if one fails
       }
     }
 
@@ -138,10 +147,9 @@ export async function createPdfFromGallery(
         const errorMsg = "No images could be added to the PDF.";
         console.error(errorMsg);
         if (onProgress) await onProgress({ type: 'error', error: errorMsg });
-        return null; // Return null if no pages were added
+        return null;
     }
 
-    // Report saving start
     if (onProgress) await onProgress({ type: 'saving' });
     console.log(`Saving PDF with ${pdfDoc.getPageCount()} pages...`);
     const pdfBytes = await pdfDoc.save();
@@ -150,10 +158,6 @@ export async function createPdfFromGallery(
   } catch (error) {
     const errorMsg = `Failed to create PDF document: ${error instanceof Error ? error.message : String(error)}`;
     console.error(errorMsg, error);
-    // Report final error if the whole process fails
-    // Note: This might not be reachable if onProgress isn't passed down or handled in the caller
-    // Consider if a final status update should happen here or be solely the caller's responsibility
-    // if (onProgress) await onProgress({ type: 'error', error: 'Failed to generate PDF.' });
     return null;
   }
 }
