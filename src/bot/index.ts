@@ -18,6 +18,7 @@ import { createGalleryTelegraphPage } from "@/utils/telegraph/createGalleryTeleg
 import { createPdfFromGallery, type PdfProgressCallback, type PdfProgressStatus } from "@/utils/pdf/createPdfFromGallery"; // Added for PDF generation and progress types
 import { sendDocument } from "@/utils/telegram/fetchers/sendDocument"; // Added for sending PDF
 import { editMessageText } from "@/utils/telegram/fetchers/editMessageText"; // Added for editing status messages
+import { getAuthToken, getOrderDetail, formatOrderDetailsMessage } from "@/utils/rukita";
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
@@ -44,6 +45,7 @@ function getHelpMessage(firstName?: string): string {
 🔍 *Basic Commands:*
 \`/help\` - Show this message
 \`/ping\` - Check if bot is alive
+\`/check\` - Check Rukita order status \\(admin only\\)
 
 📚 *NH Commands:*
 \`/nh <id>\` - Fetch data and generate PDF/Telegraph viewer
@@ -585,6 +587,72 @@ app.post(WEBHOOK, async (c) => {
         }
         return new Response("Internal Server Error", { status: 500 });
       }
+    } else if (update.message?.text === "/check") {
+      console.log("[Webhook] Processing command: /check");
+      const chatId = update.message.chat.id;
+      const userId = update.message.from?.id;
+      
+      try {
+        // Check if user is authorized
+        if (!c.env.RUKITA_TARGET_USER_ID || userId?.toString() !== c.env.RUKITA_TARGET_USER_ID) {
+          await sendPlainText(
+            c.env.ENV_BOT_TOKEN,
+            chatId,
+            "❌ Unauthorized: This command is restricted to authorized users only."
+          );
+          console.log(`[Webhook] Unauthorized /check attempt by user ${userId}`);
+          return new Response("OK", { status: 200 });
+        }
+
+        // Check if required environment variables are set
+        if (!c.env.RUKITA_USERNAME || !c.env.RUKITA_PASSWORD || !c.env.RUKITA_ORDER_ID) {
+          await sendPlainText(
+            c.env.ENV_BOT_TOKEN,
+            chatId,
+            "❌ Error: Rukita configuration is missing. Please contact the administrator."
+          );
+          console.error("[Webhook] Missing required Rukita environment variables");
+          return new Response("OK", { status: 200 });
+        }
+
+        // Send initial processing message
+        await sendPlainText(
+          c.env.ENV_BOT_TOKEN,
+          chatId,
+          "🔄 Fetching Rukita order information..."
+        );
+
+        // Get auth token (with caching)
+        const accessToken = await getAuthToken(c.env.NAMESPACE, c.env.RUKITA_USERNAME, c.env.RUKITA_PASSWORD);
+        console.log("[Webhook /check] Successfully authenticated with Rukita");
+
+        // Fetch order details
+        const orderResponse = await getOrderDetail(accessToken, c.env.RUKITA_ORDER_ID);
+        console.log("[Webhook /check] Successfully fetched order details");
+
+        // Format and send the message
+        const message = formatOrderDetailsMessage(orderResponse);
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          chatId,
+          message
+        );
+
+        console.log("[Webhook /check] Successfully sent Rukita order details");
+        return new Response("OK", { status: 200 });
+
+      } catch (error) {
+        console.error("[Webhook /check] Error:", error);
+        
+        // Send error message to user
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          chatId,
+          `❌ *Error fetching order details*\n\n${escapeMarkdown(error instanceof Error ? error.message : 'Unknown error occurred')}\n\n_Please try again later or contact support if the issue persists\\._`
+        );
+        
+        return new Response("OK", { status: 200 });
+      }
     } else if (
       update.message?.text === "/help" ||
       update.message?.text === "/start"
@@ -727,4 +795,56 @@ app.get(
   }
 );
 
-export default app;
+// Export the app and scheduled handler
+export default {
+  fetch: app.fetch,
+  scheduled: async (event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
+    console.log("[Scheduled] Rukita daily check triggered at", new Date().toISOString());
+    
+    try {
+      // Check if required environment variables are set
+      if (!env.RUKITA_USERNAME || !env.RUKITA_PASSWORD || !env.RUKITA_ORDER_ID || !env.RUKITA_TARGET_USER_ID) {
+        console.error("[Scheduled] Missing required Rukita environment variables");
+        return;
+      }
+
+      // Get auth token (with caching)
+      const accessToken = await getAuthToken(env.NAMESPACE, env.RUKITA_USERNAME, env.RUKITA_PASSWORD);
+      console.log("[Scheduled] Successfully authenticated with Rukita");
+
+      // Fetch order details
+      const orderResponse = await getOrderDetail(accessToken, env.RUKITA_ORDER_ID);
+      console.log("[Scheduled] Successfully fetched order details");
+
+      // Format the message
+      const message = formatOrderDetailsMessage(orderResponse);
+
+      // Send to Telegram
+      const telegramResponse = await sendMarkdownV2Text(
+        env.ENV_BOT_TOKEN,
+        parseInt(env.RUKITA_TARGET_USER_ID),
+        message
+      );
+
+      if (telegramResponse.ok) {
+        console.log("[Scheduled] Successfully sent Rukita order update to Telegram");
+      } else {
+        console.error("[Scheduled] Failed to send message to Telegram:", telegramResponse);
+      }
+
+    } catch (error) {
+      console.error("[Scheduled] Error in Rukita scheduled task:", error);
+      
+      // Try to send error notification to user
+      try {
+        await sendMarkdownV2Text(
+          env.ENV_BOT_TOKEN,
+          parseInt(env.RUKITA_TARGET_USER_ID!),
+          `❌ *Rukita Daily Check Error*\n\nFailed to fetch order details\\.\nError: ${escapeMarkdown(error instanceof Error ? error.message : 'Unknown error')}\n\n⏰ _${escapeMarkdown(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))}_`
+        );
+      } catch (notifyError) {
+        console.error("[Scheduled] Failed to send error notification:", notifyError);
+      }
+    }
+  }
+};
