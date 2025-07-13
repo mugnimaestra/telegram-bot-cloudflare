@@ -3,8 +3,6 @@ main = "src/bot/index.ts"
 compatibility_date = "2023-12-18"
 compatibility_flags = ["nodejs_compat"]
 
-[triggers]
-crons = ["0 23 * * *"]
 
 [vars]
 CF_ACCOUNT_ID = "1244cf2ef2ea1cf95b7b95dc8188222c"
@@ -15,10 +13,6 @@ NODE_ENV = "production"
 RSCM_API_URL = "https://www.rscm.co.id/apirscm/perjanjian.php"
 RSCM_CHECK_INTERVAL = "600"
 RSCM_SERVICES = '{"URJT Geriatri": {"user_nm": "UMSI"}}'
-RUKITA_USERNAME = "mugni"
-RUKITA_PASSWORD = "Rukita@2019"
-RUKITA_ORDER_ID = "KtbbMulT0Vlb"
-RUKITA_TARGET_USER_ID = "145890935"
 
 [observability.logs]
 enabled = true

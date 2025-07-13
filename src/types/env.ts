@@ -12,11 +12,6 @@ export interface Env {
   RSCM_API_URL?: string;
   RSCM_CHECK_INTERVAL?: string;
   RSCM_SERVICES?: string;
-  // Rukita environment variables
-  RUKITA_USERNAME?: string;
-  RUKITA_PASSWORD?: string;
-  RUKITA_ORDER_ID?: string;
-  RUKITA_TARGET_USER_ID?: string;
   // KV namespace for caching
-  NAMESPACE: KVNamespace;
+  NAMESPACE?: KVNamespace;
 }
