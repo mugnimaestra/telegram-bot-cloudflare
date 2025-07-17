@@ -2,22 +2,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleRSCMCommand } from "./handleRSCMCommand";
 import { TelegramContext } from "./types";
 import { ChatType, Message } from "../../types/telegram";
-import { mockFetchAppointments } from "./fetchers/__mocks__/fetchAppointments";
+import { CommandHandler } from "./handlers/CommandHandler";
 
 // Increase test timeout
 vi.setConfig({ testTimeout: 10000 });
 
-// Mock dependencies
-vi.mock("./fetchers/fetchAppointments");
-vi.mock("./dateUtils", () => ({
-  generateDateRanges: () => [new Date("2025-03-07")],
-  formatDate: (date: Date) => date.toISOString().split("T")[0],
-  isMorningAppointment: (time: string) => {
-    const hour = parseInt(time.split(":")[0], 10);
-    return hour < 12;
-  },
-  formatTimeRange: (startTime: string, endTime: string) => {
-    return `${startTime} - ${endTime}`;
+// Mock the CommandHandler
+vi.mock("./handlers/CommandHandler", () => ({
+  CommandHandler: vi.fn(),
+}));
+
+// Mock the logger
+vi.mock("./logger", () => ({
+  logger: {
+    info: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
@@ -57,170 +57,105 @@ describe("handleRSCMCommand", () => {
     },
   };
 
+  const mockHandleCommand = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    
+    // Reset the mock constructor
+    vi.mocked(CommandHandler).mockImplementation(() => ({
+      handleCommand: mockHandleCommand,
+    } as any));
   });
 
-  it("should show help message when no service is provided", async () => {
-    mockContext.message.text = "/rscm";
-
-    await handleRSCMCommand(mockContext);
-
-    expect(reply).toHaveBeenCalledTimes(1);
-    expect(reply.mock.calls[0][0]).toContain("RSCM Appointment Checker Help");
-    expect(reply.mock.calls[0][0]).toContain("Available services");
-  });
-
-  it("should show error for invalid service", async () => {
-    mockContext.message.text = "/rscm InvalidService";
-
-    await handleRSCMCommand(mockContext);
-
-    expect(reply).toHaveBeenCalledTimes(1);
-    expect(reply.mock.calls[0][0]).toContain("❌ Invalid service");
-  });
-
-  it("should fetch and display appointments for valid service", async () => {
+  it("should create CommandHandler and delegate to handleCommand", async () => {
     mockContext.message.text = "/rscm URJT Geriatri";
-
-    const mockAppointment = {
-      doctorName: "Dr. Test",
-      startTime: "08:00",
-      endTime: "12:00",
-      quota: 10,
-      date: "2025-03-07",
-    };
-
-    // Mock the reply function to return a Message object
-    const mockReplyMessage: Message = {
-      message_id: 2,
-      chat: {
-        id: 123,
-        type: ChatType.PRIVATE,
-      },
-      date: Math.floor(Date.now() / 1000),
-    };
-
-    // Clear all mocks before setting them up
-    vi.clearAllMocks();
-
-    // Set up mocks
-    vi.mocked(reply).mockResolvedValueOnce(mockReplyMessage);
-    vi.mocked(editMessageText).mockResolvedValueOnce(true);
-    vi.mocked(mockFetchAppointments).mockResolvedValueOnce([mockAppointment]);
+    mockHandleCommand.mockResolvedValueOnce(undefined);
 
     await handleRSCMCommand(mockContext);
 
-    // Should show processing message
+    expect(CommandHandler).toHaveBeenCalledWith(undefined);
+    expect(mockHandleCommand).toHaveBeenCalledWith(mockContext);
+  });
+
+  it("should create CommandHandler with env parameter", async () => {
+    const mockEnv = {
+      RSCM_CONFIG: '{"api_url": "https://test.com"}',
+      RSCM_API_URL: "https://test.com",
+    };
+
+    mockContext.message.text = "/rscm URJT Geriatri";
+    mockHandleCommand.mockResolvedValueOnce(undefined);
+
+    await handleRSCMCommand(mockContext, mockEnv);
+
+    expect(CommandHandler).toHaveBeenCalledWith(mockEnv);
+    expect(mockHandleCommand).toHaveBeenCalledWith(mockContext);
+  });
+
+  it("should handle errors from CommandHandler gracefully", async () => {
+    mockContext.message.text = "/rscm URJT Geriatri";
+    const testError = new Error("Test error from CommandHandler");
+    mockHandleCommand.mockRejectedValueOnce(testError);
+
+    await handleRSCMCommand(mockContext);
+
+    expect(CommandHandler).toHaveBeenCalledWith(undefined);
+    expect(mockHandleCommand).toHaveBeenCalledWith(mockContext);
     expect(reply).toHaveBeenCalledWith(
-      "🔄 Checking appointments\\.\\.\\. Please wait\\.",
-      { parse_mode: "MarkdownV2" }
-    );
-
-    // Should update with results
-    expect(editMessageText).toHaveBeenCalledWith(
-      123, // chat id
-      2, // message id from processing message
-      undefined,
-      expect.stringContaining("Dr\\. Test"), // escaped doctor name
+      "❌ An unexpected error occurred\\. Please try again later\\.",
       { parse_mode: "MarkdownV2" }
     );
   });
 
-  it("should handle API errors gracefully", async () => {
+  it("should handle errors in fallback reply", async () => {
     mockContext.message.text = "/rscm URJT Geriatri";
+    const testError = new Error("Test error from CommandHandler");
+    mockHandleCommand.mockRejectedValueOnce(testError);
+    reply.mockRejectedValueOnce(new Error("Reply failed"));
 
-    // Mock API error
-    vi.mocked(mockFetchAppointments).mockRejectedValueOnce(
-      new Error("API error")
-    );
+    // Should not throw
+    await expect(handleRSCMCommand(mockContext)).resolves.not.toThrow();
 
-    // Mock the reply function to return a Message object
-    const mockReplyMessage: Message = {
-      message_id: 2,
-      chat: {
-        id: 123,
-        type: ChatType.PRIVATE,
-      },
-      date: Math.floor(Date.now() / 1000),
-    };
-    vi.mocked(reply).mockResolvedValueOnce(mockReplyMessage);
-
-    await handleRSCMCommand(mockContext);
-
-    // Should show error message
+    expect(CommandHandler).toHaveBeenCalledWith(undefined);
+    expect(mockHandleCommand).toHaveBeenCalledWith(mockContext);
     expect(reply).toHaveBeenCalledWith(
-      expect.stringContaining("❌ *Error checking appointments*"),
+      "❌ An unexpected error occurred\\. Please try again later\\.",
       { parse_mode: "MarkdownV2" }
     );
   });
 
-  it("should show when no appointments are available", async () => {
+  it("should log command handling", async () => {
+    const { logger } = await import("./logger");
+    
     mockContext.message.text = "/rscm URJT Geriatri";
-
-    // Mock empty response
-    vi.mocked(mockFetchAppointments).mockResolvedValueOnce([]);
-    vi.mocked(mockContext.reply).mockResolvedValueOnce(mockMessage);
-    vi.mocked(editMessageText).mockResolvedValueOnce(true);
+    mockHandleCommand.mockResolvedValueOnce(undefined);
 
     await handleRSCMCommand(mockContext);
 
-    expect(editMessageText).toHaveBeenCalledWith(
-      expect.any(Number),
-      expect.any(Number),
-      undefined,
-      expect.stringContaining("No appointments available"),
-      { parse_mode: "MarkdownV2" }
+    expect(logger.info).toHaveBeenCalledWith(
+      "Handling RSCM command",
+      {
+        chatId: 123,
+        messageText: "/rscm URJT Geriatri",
+      }
     );
   });
 
-  it("should highlight earliest morning appointment when available", async () => {
+  it("should log unhandled errors", async () => {
+    const { logger } = await import("./logger");
+    
     mockContext.message.text = "/rscm URJT Geriatri";
-
-    const mockAppointments = [
-      {
-        doctorName: "Dr. Late",
-        startTime: "13:00",
-        endTime: "16:00",
-        quota: 5,
-        date: "2025-03-07",
-      },
-      {
-        doctorName: "Dr. Early",
-        startTime: "07:30",
-        endTime: "11:30",
-        quota: 8,
-        date: "2025-03-07",
-      },
-    ];
-
-    // Mock the reply function to return a Message object
-    const mockReplyMessage: Message = {
-      message_id: 2,
-      chat: {
-        id: 123,
-        type: ChatType.PRIVATE,
-      },
-      date: Math.floor(Date.now() / 1000),
-    };
-
-    // Clear all mocks before setting them up
-    vi.clearAllMocks();
-
-    // Set up mocks
-    vi.mocked(reply).mockResolvedValueOnce(mockReplyMessage);
-    vi.mocked(editMessageText).mockResolvedValueOnce(true);
-    vi.mocked(mockFetchAppointments).mockResolvedValueOnce(mockAppointments);
+    const testError = new Error("Test error");
+    mockHandleCommand.mockRejectedValueOnce(testError);
 
     await handleRSCMCommand(mockContext);
 
-    // Should update with results
-    expect(editMessageText).toHaveBeenCalledWith(
-      123, // chat id
-      2, // message id from processing message
-      undefined,
-      expect.stringContaining("Earliest Morning Appointment"),
-      { parse_mode: "MarkdownV2" }
+    expect(logger.error).toHaveBeenCalledWith(
+      "Unhandled error in RSCM command handler",
+      {
+        error: "Test error",
+      }
     );
   });
 });

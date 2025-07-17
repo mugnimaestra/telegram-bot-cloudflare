@@ -86,18 +86,77 @@ export enum RSCMErrorType {
   API_ERROR = 'API_ERROR',
   NETWORK_ERROR = 'NETWORK_ERROR',
   INVALID_RESPONSE = 'INVALID_RESPONSE',
+  TIMEOUT_ERROR = 'TIMEOUT_ERROR',
+  RATE_LIMIT_ERROR = 'RATE_LIMIT_ERROR',
+  CONFIGURATION_ERROR = 'CONFIGURATION_ERROR',
+  VALIDATION_ERROR = 'VALIDATION_ERROR',
 }
 
 /**
  * Custom error class for RSCM operations
  */
 export class RSCMError extends Error {
+  public readonly timestamp: string;
+  public readonly code?: string;
+  public readonly details?: Record<string, unknown>;
+
   constructor(
-    public type: RSCMErrorType,
+    public readonly type: RSCMErrorType,
     message: string,
+    code?: string,
+    details?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'RSCMError';
+    this.timestamp = new Date().toISOString();
+    this.code = code;
+    this.details = details;
+    
+    // Ensure proper inheritance
+    Object.setPrototypeOf(this, RSCMError.prototype);
+  }
+
+  /**
+   * Create a timeout error
+   */
+  static timeout(message: string = "Request timed out"): RSCMError {
+    return new RSCMError(RSCMErrorType.TIMEOUT_ERROR, message, "TIMEOUT");
+  }
+
+  /**
+   * Create a rate limit error
+   */
+  static rateLimit(message: string = "Rate limit exceeded"): RSCMError {
+    return new RSCMError(RSCMErrorType.RATE_LIMIT_ERROR, message, "RATE_LIMIT");
+  }
+
+  /**
+   * Create a configuration error
+   */
+  static configuration(message: string, details?: Record<string, unknown>): RSCMError {
+    return new RSCMError(RSCMErrorType.CONFIGURATION_ERROR, message, "CONFIG_ERROR", details);
+  }
+
+  /**
+   * Create a validation error
+   */
+  static validation(message: string, details?: Record<string, unknown>): RSCMError {
+    return new RSCMError(RSCMErrorType.VALIDATION_ERROR, message, "VALIDATION_ERROR", details);
+  }
+
+  /**
+   * Convert to JSON for logging
+   */
+  toJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      type: this.type,
+      message: this.message,
+      code: this.code,
+      timestamp: this.timestamp,
+      details: this.details,
+      stack: this.stack,
+    };
   }
 }
 
