@@ -38,6 +38,9 @@ export async function fetchNHData(
   });
 
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Job not found");
+    }
     throw new Error(`API request failed with status: ${response.status}`);
   }
 
@@ -95,6 +98,10 @@ export async function fetchGalleryData(galleryId: string): Promise<GalleryData |
     });
 
     if (!response.ok) {
+      if (response.status === 404) {
+        console.error(`[fetchGalleryData] Job not found: ${targetUrl}`);
+        return null;
+      }
       console.error(`[fetchGalleryData] Failed to fetch ${targetUrl}: ${response.status}`);
       return null;
     }

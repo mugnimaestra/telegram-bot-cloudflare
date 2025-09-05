@@ -7,11 +7,17 @@ export interface Env {
   NH_API_URL: string;
   // Environment mode
   NODE_ENV?: string;
-  // RSCM environment variables
-  RSCM_CONFIG?: string;
-  RSCM_API_URL?: string;
-  RSCM_CHECK_INTERVAL?: string;
-  RSCM_SERVICES?: string;
   // KV namespace for caching
   NAMESPACE?: KVNamespace;
+  // Google Gemini API key for video analysis
+  GEMINI_API_KEY: string;
+  // Chutes API token for video analysis service
+  CHUTES_API_TOKEN: string;
+  // R2 bucket configuration
+  R2_BUCKET_NAME: string;
+  R2_PUBLIC_URL: string;
+  // Video analysis service URL
+  VIDEO_ANALYSIS_SERVICE_URL: string;
+  // Webhook secret for video analysis job completion notifications
+  WEBHOOK_SECRET: string;
 }

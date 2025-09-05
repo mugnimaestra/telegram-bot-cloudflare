@@ -1,36 +1,46 @@
 {
-    "name": "telegram-bot-cloudflare",
-    "version": "1.2.0",
-    "description": "A simple Telegram bot implementation using Cloudflare Workers",
-    "main": "src/bot/index.ts",
-    "scripts": {
-        "dev": "wrangler dev --local --persist-to .wrangler/state",
-        "deploy": "wrangler deploy",
-        "test": "vitest",
-        "test:ui": "vitest --ui",
-        "test:coverage": "vitest run --coverage",
-        "test:run": "vitest run",
-        "build": "tsc",
-        "check": "tsc --noEmit"
-    },
-    "dependencies": {
-        "@jsquash/png": "^3.0.1",
-        "@jsquash/webp": "^1.4.0",
-        "fast-png": "^6.3.0",
-        "hono": "^4.6.14",
-        "pdf-lib": "^1.17.1",
-        "wasm-webp": "^0.0.2"
-    },
-    "devDependencies": {
-        "@cloudflare/workers-types": "^4.20231218.0",
-        "@types/node": "^20.10.5",
-        "@vitest/coverage-v8": "^2.1.8",
-        "@vitest/ui": "^2.1.8",
-        "happy-dom": "^16.3.0",
-        "nock": "^13.5.6",
-        "typescript": "^5.3.3",
-        "vitest": "^2.1.8",
-        "wrangler": "4.6.0"
-    },
-    "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+  "name": "telegram-bot-cloudflare",
+  "version": "1.2.0",
+  "description": "A simple Telegram bot implementation using Cloudflare Workers",
+  "main": "src/bot/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --persist-to .wrangler/state",
+    "deploy": "wrangler deploy",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:run": "vitest run",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "format:check": "prettier --check src/**/*.ts"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@jsquash/png": "^3.0.1",
+    "@jsquash/webp": "^1.4.0",
+    "fast-png": "^6.3.0",
+    "hono": "^4.6.14",
+    "pdf-lib": "^1.17.1",
+    "wasm-webp": "^0.0.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20231218.0",
+    "@types/node": "^20.10.5",
+    "@typescript-eslint/eslint-plugin": "^8.41.0",
+    "@typescript-eslint/parser": "^8.41.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "@vitest/ui": "^2.1.8",
+    "eslint": "^9.34.0",
+    "happy-dom": "^16.3.0",
+    "nock": "^13.5.6",
+    "prettier": "^3.6.2",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.8",
+    "wrangler": "4.6.0"
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

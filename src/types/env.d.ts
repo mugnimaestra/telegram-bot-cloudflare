@@ -13,6 +13,9 @@ export interface Env {
     R2_PUBLIC_URL: string;
     BUCKET: R2Bucket;
     NH_API_URL: string;
+    // Google Gemini API for video analysis
+    GEMINI_API_KEY: string;
+    // Task completed: Added GEMINI_API_KEY to environment types at 2025-01-04T10:30:00.000Z UTC
   };
 }
 

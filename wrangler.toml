@@ -9,10 +9,8 @@ CF_ACCOUNT_ID = "1244cf2ef2ea1cf95b7b95dc8188222c"
 R2_BUCKET_NAME = "nhapiod-proxy"
 R2_PUBLIC_URL = "https://pub-0a13ff58e0fb441aafab98f56637c326.r2.dev"
 NH_API_URL = "https://nhapiod-proxy.onrender.com"
+VIDEO_ANALYSIS_SERVICE_URL = "https://cloudflared-api-video.mugnimaestra.dev"
 NODE_ENV = "production"
-RSCM_API_URL = "https://www.rscm.co.id/apirscm/perjanjian.php"
-RSCM_CHECK_INTERVAL = "600"
-RSCM_SERVICES = '{"URJT Geriatri": {"user_nm": "UMSI"}}'
 
 [observability.logs]
 enabled = true
@@ -28,4 +26,3 @@ bucket_name = "nhapiod-proxy"
 
 [build]
 command = "" # No custom build command needed if just using esbuild defaults
-upload.format = "modules"

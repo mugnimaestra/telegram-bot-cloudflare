@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot built on Cloudflare Workers (serverless edge computing) that fetches NH content and generates PDFs with Telegraph viewer support. The bot also includes RSCM appointment checking functionality.
+This is a Telegram bot built on Cloudflare Workers (serverless edge computing) that fetches NH content and generates PDFs with Telegraph viewer support.
 
 **Stack**: TypeScript, Hono framework, Cloudflare Workers, R2 storage, KV namespace
 
@@ -40,14 +40,12 @@ yarn build
    - `src/utils/pdf/` - PDF generation with WASM-based image conversion
    - `src/utils/telegraph/` - Telegraph page creation
    - `src/utils/telegram/` - Telegram API utilities
-   - `src/utils/rscm/` - RSCM appointment checking
 
 ### Bot Commands
 
 - `/nh <id>` - Fetch content and generate PDF/Telegraph
 - `/read <id_or_url>` - Telegraph viewer only
 - `/getpdf <id_or_url>` - PDF generation only
-- `/rscm <service>` - Check RSCM appointments
 - `/help`, `/start` - Show help message
 - `/ping` - Health check
 

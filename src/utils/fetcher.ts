@@ -28,6 +28,9 @@ export async function fetcher<T>({
   const response = await fetch(`${baseUrl}${url}`, options);
 
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Job not found");
+    }
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 

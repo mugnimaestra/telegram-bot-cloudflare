@@ -64,7 +64,7 @@ describe("fetchNHData", () => {
     console.log("Pending mocks:", scope.pendingMocks());
 
     await expect(fetchNHData({ galleryId }, nhApiUrl)).rejects.toThrow(
-      "HTTP error! status: 404"
+      "Job not found"
     );
 
     console.log("Pending mocks after request:", scope.pendingMocks());

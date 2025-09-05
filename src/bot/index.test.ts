@@ -17,6 +17,14 @@ describe("Bot", () => {
       ENV_BOT_SECRET: string;
       BUCKET: R2Bucket;
       NH_API_URL: string;
+      NODE_ENV?: string;
+      NAMESPACE?: any;
+      GEMINI_API_KEY: string;
+      CHUTES_API_TOKEN: string;
+      R2_BUCKET_NAME: string;
+      R2_PUBLIC_URL: string;
+      VIDEO_ANALYSIS_SERVICE_URL: string;
+      WEBHOOK_SECRET: string;
     };
     Variables: Variables;
   }>;
@@ -26,6 +34,14 @@ describe("Bot", () => {
     ENV_BOT_SECRET: string;
     BUCKET: R2Bucket;
     NH_API_URL: string;
+    NODE_ENV?: string;
+    NAMESPACE?: any;
+    GEMINI_API_KEY: string;
+    CHUTES_API_TOKEN: string;
+    R2_BUCKET_NAME: string;
+    R2_PUBLIC_URL: string;
+    VIDEO_ANALYSIS_SERVICE_URL: string;
+    WEBHOOK_SECRET: string;
   };
 
   beforeEach(() => {
@@ -42,6 +58,12 @@ describe("Bot", () => {
       ENV_BOT_SECRET: "test_secret",
       BUCKET: mockBucket,
       NH_API_URL: "https://api.example.com",
+      GEMINI_API_KEY: "test_gemini_key",
+      CHUTES_API_TOKEN: "test_chutes_token",
+      R2_BUCKET_NAME: "test_bucket",
+      R2_PUBLIC_URL: "https://test.r2.dev",
+      VIDEO_ANALYSIS_SERVICE_URL: "https://test-video-service.com",
+      WEBHOOK_SECRET: "test_webhook_secret",
     };
 
     // Import the app for each test to get a fresh instance
