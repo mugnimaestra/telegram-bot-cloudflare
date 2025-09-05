@@ -22,25 +22,25 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
   try {
     let message = `🍳 *${escapeMarkdown(recipe.title || "Recipe from Video")}*\n\n`;
 
-    // Basic info section
+    // Basic info section with enhanced emojis
     const infoItems = [];
-    if (recipe.servings) infoItems.push(`👥 ${recipe.servings} servings`);
+    if (recipe.servings) infoItems.push(`👥 *Serves:* ${recipe.servings}`);
     if (recipe.prepTime)
-      infoItems.push(`⏱️ Prep: ${escapeMarkdown(recipe.prepTime)}`);
+      infoItems.push(`⏱️ *Prep:* ${escapeMarkdown(recipe.prepTime)}`);
     if (recipe.cookTime)
-      infoItems.push(`🔥 Cook: ${escapeMarkdown(recipe.cookTime)}`);
+      infoItems.push(`🔥 *Cook:* ${escapeMarkdown(recipe.cookTime)}`);
     if (recipe.totalTime)
-      infoItems.push(`⏰ Total: ${escapeMarkdown(recipe.totalTime)}`);
+      infoItems.push(`⏰ *Total:* ${escapeMarkdown(recipe.totalTime)}`);
     if (recipe.difficulty)
-      infoItems.push(`📊 ${escapeMarkdown(recipe.difficulty)}`);
+      infoItems.push(`📊 *Difficulty:* ${escapeMarkdown(recipe.difficulty)}`);
 
     if (infoItems.length > 0) {
-      message += infoItems.join(" • ") + "\n\n";
+      message += infoItems.join(" \\| ") + "\n\n";
     }
 
     // Ingredients
     if (recipe.ingredients && recipe.ingredients.length > 0) {
-      message += `📝 *Ingredients:*\n`;
+      message += `🛒 *Shopping List:*\n`;
       recipe.ingredients.forEach((ing, index) => {
         // Safety check for undefined ingredient object
         if (!ing) {
@@ -49,13 +49,17 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
         }
         
         // Only add ingredients that have meaningful content
-        if (!ing.item && !ing.amount) return;
+        if (!ing.item && !ing.amount && !ing.name) return;
 
+        const item = escapeMarkdown(ing.item || ing.name || "");
         const amount = ing.amount ? `${escapeMarkdown(ing.amount)} ` : "";
-        const prep = ing.preparation
-          ? ` (${escapeMarkdown(ing.preparation)})`
+        const unit = ing.unit ? `${escapeMarkdown(ing.unit)} ` : "";
+        const prep = ing.preparation || ing.notes
+          ? ` (${escapeMarkdown(ing.preparation || ing.notes || "")})`
           : "";
-        message += `• ${amount}${escapeMarkdown(ing.item || "")}${prep}\n`;
+        const optional = ing.optional ? " *(optional)*" : "";
+        
+        message += `• ${amount}${unit}${item}${prep}${optional}\n`;
       });
     }
 
@@ -75,7 +79,7 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
 
     // Instructions
     if (recipe.instructions && recipe.instructions.length > 0) {
-      message += `\n📖 *Instructions:*\n`;
+      message += `\n👩‍🍳 *Cooking Instructions:*\n`;
       recipe.instructions.forEach((inst, index) => {
         // Safety check for undefined instruction object
         if (!inst) {
@@ -83,13 +87,24 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
           return;
         }
 
-        const duration = inst.duration
-          ? ` [${escapeMarkdown(inst.duration)}]`
+        const stepNum = inst.step || inst.step_number || index + 1;
+        const description = escapeMarkdown(inst.description || inst.action || "");
+        const duration = inst.duration || inst.time
+          ? ` ⏱️ ${escapeMarkdown(inst.duration || inst.time || "")}`
           : "";
-        message += `\n*Step ${inst.step || index + 1}*${duration}\n`;
-        message += `${escapeMarkdown(inst.description || "")}\n`;
+        const temperature = inst.temperature
+          ? ` 🌡️ ${escapeMarkdown(inst.temperature)}`
+          : "";
+        
+        message += `\n*Step ${stepNum}*${duration}${temperature}\n`;
+        message += `${description}\n`;
+        
         if (inst.tips) {
           message += `💡 _${escapeMarkdown(inst.tips)}_\n`;
+        }
+        
+        if (inst.visual_cues) {
+          message += `👁️ _${escapeMarkdown(inst.visual_cues)}_\n`;
         }
       });
     }

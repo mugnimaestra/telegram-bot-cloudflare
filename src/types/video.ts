@@ -22,10 +22,18 @@ export interface CookingRecipe {
   ingredients: Array<{
     /** Name of the ingredient */
     item: string;
+    /** Alternative name field for compatibility */
+    name?: string;
     /** Quantity/measurement (e.g., "2 cups", "1 tablespoon") */
     amount?: string;
+    /** Unit of measurement (e.g., "cups", "tablespoon") */
+    unit?: string;
     /** Preparation notes (e.g., "diced", "room temperature", "melted") */
     preparation?: string;
+    /** Additional notes about the ingredient */
+    notes?: string;
+    /** Whether the ingredient is optional */
+    optional?: boolean;
   }>;
   /** List of equipment/tools needed */
   equipment: string[];
@@ -33,10 +41,20 @@ export interface CookingRecipe {
   instructions: Array<{
     /** Step number */
     step: number;
+    /** Alternative step number field for compatibility */
+    step_number?: number;
     /** Detailed description of the step */
     description: string;
+    /** Alternative action field for compatibility */
+    action?: string;
     /** Duration for this step if specified */
     duration?: string;
+    /** Alternative time field for compatibility */
+    time?: string;
+    /** Temperature for this step if specified */
+    temperature?: string;
+    /** Visual cues for this step */
+    visual_cues?: string;
     /** Additional tips for this step */
     tips?: string;
   }>;

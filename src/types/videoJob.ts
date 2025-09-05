@@ -43,18 +43,27 @@ export interface VideoAnalysisJobStatus {
   updated_at: string;
   result?: {
     recipe?: {
-      title: string;
+      title?: string;
+      recipe_title?: string;
       ingredients: Array<{
-        name: string;
-        amount: string;
-        unit: string;
+        item?: string;
+        name?: string;
+        amount?: string;
+        unit?: string;
+        preparation?: string;
         notes?: string;
+        optional?: boolean;
       }>;
       instructions: Array<{
-        step: number;
-        instruction: string;
+        step?: number;
+        step_number?: number;
+        instruction?: string;
+        action?: string;
         time?: string;
+        duration?: string;
         temperature?: string;
+        visual_cues?: string;
+        tips?: string;
       }>;
       prep_time?: string;
       cook_time?: string;
@@ -62,8 +71,10 @@ export interface VideoAnalysisJobStatus {
       servings?: number;
       difficulty?: string;
       cuisine?: string;
+      cuisine_type?: string;
       tags?: string[];
       notes?: string;
+      notes_and_tips?: string[];
     };
   };
   error?: string;
@@ -74,18 +85,27 @@ export interface VideoAnalysisWebhookPayload {
   status: 'completed' | 'failed';
   result?: {
     recipe?: {
-      title: string;
+      title?: string;
+      recipe_title?: string;
       ingredients: Array<{
-        name: string;
-        amount: string;
-        unit: string;
+        item?: string;
+        name?: string;
+        amount?: string;
+        unit?: string;
+        preparation?: string;
         notes?: string;
+        optional?: boolean;
       }>;
       instructions: Array<{
-        step: number;
-        instruction: string;
+        step?: number;
+        step_number?: number;
+        instruction?: string;
+        action?: string;
         time?: string;
+        duration?: string;
         temperature?: string;
+        visual_cues?: string;
+        tips?: string;
       }>;
       prep_time?: string;
       cook_time?: string;
@@ -93,8 +113,10 @@ export interface VideoAnalysisWebhookPayload {
       servings?: number;
       difficulty?: string;
       cuisine?: string;
+      cuisine_type?: string;
       tags?: string[];
       notes?: string;
+      notes_and_tips?: string[];
     };
   };
   error?: string;

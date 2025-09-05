@@ -40,20 +40,28 @@ export async function handleVideoJobWebhook(
         title: recipe.title,
         ingredientsCount: recipe.ingredients?.length || 0,
         instructionsCount: recipe.instructions?.length || 0,
+        hasTitle: !!recipe.title,
+        hasIngredients: Array.isArray(recipe.ingredients) && recipe.ingredients.length > 0,
+        hasInstructions: Array.isArray(recipe.instructions) && recipe.instructions.length > 0,
+        rawIngredients: recipe.ingredients,
+        rawInstructions: recipe.instructions,
+        // Check if ingredients have proper data
+        firstIngredient: recipe.ingredients?.[0],
+        firstInstruction: recipe.instructions?.[0],
       });
 
       const formattedRecipe = formatRecipeMessage({
-        title: recipe.title || "Recipe from Video",
+        title: recipe.title || recipe.recipe_title || "Recipe from Video",
         ingredients: (recipe.ingredients || []).map(ing => ({
-          item: ing.name || "",
+          item: ing.name || ing.item || "",
           amount: ing.amount && ing.unit ? `${ing.amount} ${ing.unit}`.trim() : (ing.amount || ""),
-          preparation: ing.notes || "",
+          preparation: ing.notes || ing.preparation || "",
         })),
         equipment: [], // Default empty array as equipment data is not provided by the API
         instructions: (recipe.instructions || []).map(inst => ({
-          step: inst.step || 0,
-          description: inst.instruction || "",
-          duration: inst.time || "",
+          step: inst.step || inst.step_number || 0,
+          description: inst.instruction || inst.action || "",
+          duration: inst.time || inst.duration || "",
         })),
         prepTime: recipe.prep_time,
         cookTime: recipe.cook_time,
