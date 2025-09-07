@@ -40,63 +40,80 @@ export async function handleVideoJobWebhook(
     const { job_id, status, result, error, error_type, error_details, callback_data } = payload;
     const { chat_id, message_id, bot_token } = callback_data;
 
-    if (status === 'completed' && result?.recipe) {
-      // Format and send the recipe
-      const recipe = result.recipe;
-      
-      // Log the raw recipe data for debugging
-      logger.debug("Raw recipe data from backend", {
-        recipe: JSON.stringify(recipe, null, 2),
-        title: recipe.title,
-        ingredientsCount: recipe.ingredients?.length || 0,
-        instructionsCount: recipe.instructions?.length || 0,
-        hasTitle: !!recipe.title,
-        hasIngredients: Array.isArray(recipe.ingredients) && recipe.ingredients.length > 0,
-        hasInstructions: Array.isArray(recipe.instructions) && recipe.instructions.length > 0,
-        rawIngredients: recipe.ingredients,
-        rawInstructions: recipe.instructions,
-        // Check if ingredients have proper data
-        firstIngredient: recipe.ingredients?.[0],
-        firstInstruction: recipe.instructions?.[0],
-      });
+    if (status === 'completed' && result) {
+      // Check if we have the new pre-formatted recipe text
+      if (result.recipe_text && result.recipe_ready) {
+        // Use pre-formatted text directly - no complex parsing needed
+        logger.info("Using pre-formatted recipe text from backend", {
+          jobId: job_id,
+          recipeTitle: result.recipe_title,
+          textLength: result.recipe_text.length,
+        });
 
-      const formattedRecipe = formatRecipeMessage({
-        title: recipe.title || recipe.recipe_title || "Recipe from Video",
-        ingredients: (recipe.ingredients || []).map(ing => ({
-          item: ing.name || ing.item || "",
-          amount: ing.amount && ing.unit ? `${ing.amount} ${ing.unit}`.trim() : (ing.amount || ""),
-          preparation: ing.notes || ing.preparation || "",
-        })),
-        equipment: (recipe.equipment || []).map(eq => eq.item || "").filter(Boolean),
-        instructions: (recipe.instructions || []).map(inst => ({
-          step: inst.step || inst.step_number || 0,
-          description: inst.instruction || inst.action || "",
-          duration: inst.time || inst.duration || "",
-        })),
-        prepTime: recipe.prep_time_minutes ? `${recipe.prep_time_minutes} minutes` : undefined,
-        cookTime: recipe.cook_time_minutes ? `${recipe.cook_time_minutes} minutes` : undefined,
-        totalTime: recipe.total_time_minutes ? `${recipe.total_time_minutes} minutes` : undefined,
-        servings: recipe.servings,
-        difficulty: recipe.difficulty_level,
-        notes: recipe.notes_and_tips?.join('\n• '),
-      });
+        await editMessageText(
+          {
+            chat_id: chat_id,
+            message_id: message_id,
+            text: result.recipe_text,
+            parse_mode: "MarkdownV2",
+          },
+          bot_token,
+        );
 
-      // Update the original message with the recipe
-      await editMessageText(
-        {
-          chat_id: chat_id,
-          message_id: message_id,
-          text: formattedRecipe,
-          parse_mode: "MarkdownV2",
-        },
-        bot_token,
-      );
+        logger.info("Successfully updated message with pre-formatted recipe", {
+          jobId: job_id,
+          chatId: chat_id,
+          recipeTitle: result.recipe_title,
+        });
 
-      logger.info("Successfully updated message with recipe", {
-        jobId: job_id,
-        chatId: chat_id,
-        recipeTitle: recipe.title,
-      });
+      } else if (result.recipe) {
+        // Fallback to old recipe format for backward compatibility
+        const recipe = result.recipe;
+        
+        logger.debug("Using legacy recipe format from backend", {
+          jobId: job_id,
+          title: recipe.title,
+          ingredientsCount: recipe.ingredients?.length || 0,
+          instructionsCount: recipe.instructions?.length || 0,
+        });
+
+        const formattedRecipe = formatRecipeMessage({
+          title: recipe.title || recipe.recipe_title || "Recipe from Video",
+          ingredients: (recipe.ingredients || []).map(ing => ({
+            item: ing.name || ing.item || "",
+            amount: ing.amount && ing.unit ? `${ing.amount} ${ing.unit}`.trim() : (ing.amount || ""),
+            preparation: ing.notes || ing.preparation || "",
+          })),
+          equipment: (recipe.equipment || []).map(eq => eq.item || "").filter(Boolean),
+          instructions: (recipe.instructions || []).map(inst => ({
+            step: inst.step || inst.step_number || 0,
+            description: inst.instruction || inst.action || "",
+            duration: inst.time || inst.duration || "",
+          })),
+          prepTime: recipe.prep_time_minutes ? `${recipe.prep_time_minutes} minutes` : undefined,
+          cookTime: recipe.cook_time_minutes ? `${recipe.cook_time_minutes} minutes` : undefined,
+          totalTime: recipe.total_time_minutes ? `${recipe.total_time_minutes} minutes` : undefined,
+          servings: recipe.servings ? (typeof recipe.servings === 'string' ? parseInt(recipe.servings) : recipe.servings) : undefined,
+          difficulty: recipe.difficulty_level,
+          notes: recipe.notes_and_tips?.join('\n• '),
+        });
+
+        await editMessageText(
+          {
+            chat_id: chat_id,
+            message_id: message_id,
+            text: formattedRecipe,
+            parse_mode: "MarkdownV2",
+          },
+          bot_token,
+        );
+
+        logger.info("Successfully updated message with legacy recipe format", {
+          jobId: job_id,
+          chatId: chat_id,
+          recipeTitle: recipe.title,
+        });
+      }
 
     } else if (status === 'failed') {
       // Update message with error
@@ -294,13 +311,104 @@ export async function handleVideoJobWebhook(
 }
 
 export function isValidWebhookPayload(payload: any): payload is VideoAnalysisWebhookPayload {
-  return (
-    payload &&
-    typeof payload.job_id === 'string' &&
-    (payload.status === 'completed' || payload.status === 'failed') &&
-    payload.callback_data &&
-    typeof payload.callback_data.chat_id === 'number' &&
-    typeof payload.callback_data.message_id === 'number' &&
-    typeof payload.callback_data.bot_token === 'string'
-  );
+  // Log detailed validation info for debugging
+  logger.info("[isValidWebhookPayload] Validating payload", {
+    hasPayload: !!payload,
+    jobId: { exists: !!payload?.job_id, type: typeof payload?.job_id, value: payload?.job_id },
+    status: { exists: !!payload?.status, type: typeof payload?.status, value: payload?.status },
+    callbackData: { exists: !!payload?.callback_data, type: typeof payload?.callback_data },
+    chatId: { 
+      exists: !!payload?.callback_data?.chat_id, 
+      type: typeof payload?.callback_data?.chat_id, 
+      value: payload?.callback_data?.chat_id,
+      isNumber: typeof payload?.callback_data?.chat_id === 'number',
+      canConvertToNumber: !isNaN(Number(payload?.callback_data?.chat_id))
+    },
+    messageId: { 
+      exists: !!payload?.callback_data?.message_id, 
+      type: typeof payload?.callback_data?.message_id, 
+      value: payload?.callback_data?.message_id,
+      isNumber: typeof payload?.callback_data?.message_id === 'number',
+      canConvertToNumber: !isNaN(Number(payload?.callback_data?.message_id))
+    },
+    botToken: { 
+      exists: !!payload?.callback_data?.bot_token, 
+      type: typeof payload?.callback_data?.bot_token, 
+      length: payload?.callback_data?.bot_token?.length 
+    }
+  });
+
+  // Basic structure validation
+  if (!payload) {
+    logger.error("[isValidWebhookPayload] Payload is null or undefined");
+    return false;
+  }
+
+  if (typeof payload.job_id !== 'string') {
+    logger.error("[isValidWebhookPayload] job_id is not a string", { 
+      type: typeof payload.job_id, 
+      value: payload.job_id 
+    });
+    return false;
+  }
+
+  if (payload.status !== 'completed' && payload.status !== 'failed') {
+    logger.error("[isValidWebhookPayload] Invalid status", { 
+      status: payload.status, 
+      type: typeof payload.status 
+    });
+    return false;
+  }
+
+  if (!payload.callback_data) {
+    logger.error("[isValidWebhookPayload] callback_data is missing");
+    return false;
+  }
+
+  // More flexible chat_id validation - accept numbers or numeric strings
+  const chatId = payload.callback_data.chat_id;
+  if (typeof chatId !== 'number' && (typeof chatId !== 'string' || isNaN(Number(chatId)))) {
+    logger.error("[isValidWebhookPayload] chat_id is not a valid number", { 
+      type: typeof chatId, 
+      value: chatId,
+      canConvert: !isNaN(Number(chatId))
+    });
+    return false;
+  }
+
+  // More flexible message_id validation - accept numbers or numeric strings
+  const messageId = payload.callback_data.message_id;
+  if (typeof messageId !== 'number' && (typeof messageId !== 'string' || isNaN(Number(messageId)))) {
+    logger.error("[isValidWebhookPayload] message_id is not a valid number", { 
+      type: typeof messageId, 
+      value: messageId,
+      canConvert: !isNaN(Number(messageId))
+    });
+    return false;
+  }
+
+  if (typeof payload.callback_data.bot_token !== 'string') {
+    logger.error("[isValidWebhookPayload] bot_token is not a string", { 
+      type: typeof payload.callback_data.bot_token 
+    });
+    return false;
+  }
+
+  // Type coercion for numeric fields to ensure compatibility
+  if (typeof payload.callback_data.chat_id === 'string') {
+    payload.callback_data.chat_id = Number(payload.callback_data.chat_id);
+    logger.info("[isValidWebhookPayload] Converted chat_id from string to number", {
+      newValue: payload.callback_data.chat_id
+    });
+  }
+
+  if (typeof payload.callback_data.message_id === 'string') {
+    payload.callback_data.message_id = Number(payload.callback_data.message_id);
+    logger.info("[isValidWebhookPayload] Converted message_id from string to number", {
+      newValue: payload.callback_data.message_id
+    });
+  }
+
+  logger.info("[isValidWebhookPayload] Validation passed");
+  return true;
 }

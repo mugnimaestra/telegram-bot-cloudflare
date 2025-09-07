@@ -105,6 +105,11 @@ export interface VideoAnalysisWebhookPayload {
   job_id: string;
   status: 'completed' | 'failed';
   result?: {
+    // New simplified structure with pre-formatted text
+    recipe_text?: string;
+    recipe_title?: string;
+    recipe_ready?: boolean;
+    // Keep existing recipe structure for backward compatibility
     recipe?: {
       title?: string;
       recipe_title?: string;

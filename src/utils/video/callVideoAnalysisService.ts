@@ -98,10 +98,17 @@ export async function callVideoAnalysisService(
         };
       }
       if (response.status === 400) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData: unknown = await response.json().catch(() => ({}));
+        const errorMessage = 
+          errorData && 
+          typeof errorData === 'object' && 
+          'error' in errorData && 
+          typeof errorData.error === 'string' 
+            ? errorData.error 
+            : "Invalid request format";
         return {
           success: false,
-          error: errorData.error || "Invalid request format",
+          error: errorMessage,
         };
       }
       throw new Error(
@@ -111,12 +118,17 @@ export async function callVideoAnalysisService(
 
     // Handle 202 (Job accepted) response for async processing
     if (response.status === 202) {
-      const result = await response.json();
+      const result: unknown = await response.json();
+      
+      // Type-safe extraction of job response fields
+      const jobId = result && typeof result === 'object' && 'job_id' in result && typeof result.job_id === 'string' ? result.job_id : 'unknown';
+      const status = result && typeof result === 'object' && 'status' in result && typeof result.status === 'string' ? result.status : 'unknown';
+      const message = result && typeof result === 'object' && 'message' in result && typeof result.message === 'string' ? result.message : 'Job accepted';
       
       logger.info("Video analysis job accepted for async processing", {
-        jobId: result.job_id,
-        status: result.status,
-        message: result.message,
+        jobId,
+        status,
+        message,
       });
 
       return {

@@ -221,26 +221,136 @@ app.use("*", async (c, next) => {
 app.post("/webhook/video-analysis", async (c) => {
   logger.info("[Video Job Webhook] Received completion notification");
 
+  // Log specific headers for debugging (Hono Request doesn't support full header iteration)
+  const importantHeaders = {
+    'content-type': c.req.header('Content-Type'),
+    'content-length': c.req.header('Content-Length'),
+    'x-webhook-secret': c.req.header('X-Webhook-Secret'),
+    'user-agent': c.req.header('User-Agent')
+  };
+  logger.info("[Video Job Webhook] Request headers", { headers: importantHeaders });
+
+  // Log request details
+  const contentType = c.req.header("Content-Type");
+  const userAgent = c.req.header("User-Agent");
+  const contentLength = c.req.header("Content-Length");
+  
+  logger.info("[Video Job Webhook] Request details", {
+    contentType,
+    userAgent,
+    contentLength,
+    method: c.req.method,
+    url: c.req.url
+  });
+
+  // Check environment variables
+  logger.info("[Video Job Webhook] Environment check", {
+    hasWebhookSecret: !!c.env.WEBHOOK_SECRET,
+    webhookSecretLength: c.env.WEBHOOK_SECRET?.length || 0,
+    hasNamespace: !!c.env.NAMESPACE
+  });
+
+  // Verify webhook secret environment configuration
+  if (!c.env.WEBHOOK_SECRET) {
+    logger.error("[Video Job Webhook] WEBHOOK_SECRET environment variable not configured");
+    return new Response("Server configuration error: Missing webhook secret", { status: 500 });
+  }
+
   // Verify webhook secret
   const providedSecret = c.req.header("X-Webhook-Secret");
   if (!providedSecret) {
-    logger.error("[Video Job Webhook] Missing webhook secret");
+    logger.error("[Video Job Webhook] Missing webhook secret header");
     return new Response("Missing webhook secret", { status: 401 });
   }
 
-  let payload: VideoAnalysisWebhookPayload;
-  try {
-    payload = await c.req.json();
-  } catch (error) {
-    logger.error("[Video Job Webhook] Invalid JSON", { error });
-    return new Response("Invalid JSON", { status: 400 });
+  logger.info("[Video Job Webhook] Webhook secret validation", {
+    providedSecretLength: providedSecret.length,
+    expectedSecretLength: c.env.WEBHOOK_SECRET.length,
+    secretsMatch: providedSecret === c.env.WEBHOOK_SECRET
+  });
+
+  if (providedSecret !== c.env.WEBHOOK_SECRET) {
+    logger.error("[Video Job Webhook] Webhook secret mismatch");
+    return new Response("Invalid webhook secret", { status: 401 });
   }
 
-  // Validate payload structure
+  let payload: VideoAnalysisWebhookPayload;
+  let rawBody: string = "";
+  
+  try {
+    // Get raw body first for debugging
+    rawBody = await c.req.text();
+    logger.info("[Video Job Webhook] Raw payload received", {
+      payloadSize: rawBody.length,
+      payloadPreview: rawBody.substring(0, 500) + (rawBody.length > 500 ? "..." : "")
+    });
+
+    // Check payload size (Cloudflare Workers have a 100MB limit, but let's be reasonable)
+    const MAX_PAYLOAD_SIZE = 10 * 1024 * 1024; // 10MB limit for webhook payloads
+    if (rawBody.length > MAX_PAYLOAD_SIZE) {
+      logger.error("[Video Job Webhook] Payload too large", {
+        size: rawBody.length,
+        maxSize: MAX_PAYLOAD_SIZE
+      });
+      return new Response("Payload too large", { status: 413 });
+    }
+
+    // Validate JSON structure before parsing
+    if (!rawBody.trim().startsWith('{') || !rawBody.trim().endsWith('}')) {
+      logger.error("[Video Job Webhook] Invalid JSON structure", {
+        startsWithBrace: rawBody.trim().startsWith('{'),
+        endsWithBrace: rawBody.trim().endsWith('}'),
+        firstChars: rawBody.substring(0, 10),
+        lastChars: rawBody.substring(Math.max(0, rawBody.length - 10))
+      });
+      return new Response("Invalid JSON structure", { status: 400 });
+    }
+
+    // Parse JSON with error handling
+    const parsedPayload: unknown = JSON.parse(rawBody);
+    payload = parsedPayload as VideoAnalysisWebhookPayload;
+    
+    // Safe logging without 'any' types
+    const isObject = typeof parsedPayload === 'object' && parsedPayload !== null;
+    logger.info("[Video Job Webhook] JSON parsing successful", {
+      isObject,
+      hasJobId: isObject && 'job_id' in parsedPayload,
+      hasStatus: isObject && 'status' in parsedPayload,
+      hasCallbackData: isObject && 'callback_data' in parsedPayload
+    });
+    
+  } catch (error) {
+    logger.error("[Video Job Webhook] JSON parsing failed", { 
+      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : "Unknown",
+      rawBodyLength: rawBody.length,
+      rawBodyPreview: rawBody.substring(0, 200) || "No body",
+      isParseError: error instanceof SyntaxError
+    });
+    return new Response("Invalid JSON format", { status: 400 });
+  }
+
+  // Log payload structure for debugging - using unknown type for safety
+  const unknownPayload = payload as unknown;
+  const hasJobId = unknownPayload && typeof unknownPayload === 'object' && 'job_id' in unknownPayload;
+  const hasStatus = unknownPayload && typeof unknownPayload === 'object' && 'status' in unknownPayload;
+  const hasCallbackData = unknownPayload && typeof unknownPayload === 'object' && 'callback_data' in unknownPayload;
+  
+  logger.info("[Video Job Webhook] Payload structure", {
+    hasJobId,
+    hasStatus,
+    hasCallbackData,
+    payloadType: typeof unknownPayload,
+    isObject: typeof unknownPayload === 'object' && unknownPayload !== null
+  });
+
+  // Validate payload structure with detailed logging
   if (!isValidWebhookPayload(payload)) {
-    logger.error("[Video Job Webhook] Invalid payload structure", { payload });
+    logger.error("[Video Job Webhook] Payload validation failed - see isValidWebhookPayload logs for details");
     return new Response("Invalid payload structure", { status: 400 });
   }
+
+  logger.info("[Video Job Webhook] Payload validation passed");
 
   // Process the webhook
   const result = await handleVideoJobWebhook(
