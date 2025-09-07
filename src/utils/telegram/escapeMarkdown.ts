@@ -9,8 +9,9 @@ export function escapeMarkdown(text: string): string {
   }
   
   // Characters that need escaping in MarkdownV2:
-  // '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\'
-  return text.replace(/[_*[\]()~`>#+=|{}.!\\-]/g, "\\$&");
+  // '_', '*', '[', ']', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\'
+  // Note: Parentheses '()' are NOT escaped as they're commonly used in text
+  return text.replace(/[_*[\]~`>#+=|{}.!\\-]/g, "\\$&");
 }
 
 /**
@@ -31,7 +32,8 @@ export function escapeFormattedText(text: string): string {
   }
   // Inside formatting entities, we still need to escape special characters
   // but we need to be more careful about which ones
-  return text.replace(/[_*[\]()~`>#+=|{}.!\\-]/g, "\\$&");
+  // Note: Parentheses '()' are NOT escaped as they're commonly used in text
+  return text.replace(/[_*[\]~`>#+=|{}.!\\-]/g, "\\$&");
 }
 
 /**

@@ -14,14 +14,14 @@ import {
 describe("escapeMarkdown", () => {
   it("should escape special Markdown V2 characters", () => {
     const input = "_*[]()~`>#+=|{}.!-";
-    const expected = "\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\=\\|\\{\\}\\.\\!\\-";
+    const expected = "\\_\\*\\[\\]()\\~\\`\\>\\#\\+\\=\\|\\{\\}\\.\\!\\-";
     expect(escapeMarkdown(input)).toBe(expected);
   });
 
   it("should handle text with multiple special characters", () => {
     const input = "Hello *world* with _emphasis_ and [link](url)";
     const expected =
-      "Hello \\*world\\* with \\_emphasis\\_ and \\[link\\]\\(url\\)";
+      "Hello \\*world\\* with \\_emphasis\\_ and \\[link\\](url)";
     expect(escapeMarkdown(input)).toBe(expected);
   });
 
