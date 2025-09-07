@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot built on Cloudflare Workers (serverless edge computing) that fetches NH content and generates PDFs with Telegraph viewer support.
+This is a Telegram bot built on Cloudflare Workers (serverless edge computing) that fetches NH content and generates PDFs with Telegraph viewer support, plus AI-powered cooking video recipe extraction.
 
-**Stack**: TypeScript, Hono framework, Cloudflare Workers, R2 storage, KV namespace
+**Stack**: TypeScript, Hono framework, Cloudflare Workers, R2 storage, KV namespace, Google Gemini AI, Chutes AI
 
 ## Development Commands
 
@@ -28,6 +28,18 @@ yarn deploy
 
 # TypeScript compilation check
 yarn build
+
+# Lint TypeScript code
+yarn lint
+
+# Fix linting issues automatically
+yarn lint:fix
+
+# Format code with Prettier
+yarn format
+
+# Check code formatting
+yarn format:check
 ```
 
 ## High-Level Architecture
@@ -43,14 +55,17 @@ yarn build
    - `src/utils/pdf/` - PDF generation with WASM-based image conversion
    - `src/utils/telegraph/` - Telegraph page creation
    - `src/utils/telegram/` - Telegram API utilities
+   - `src/utils/video/` - Video analysis and recipe extraction using AI models
 
 ### Bot Commands
 
 - `/nh <id>` - Fetch content and generate PDF/Telegraph
-- `/read <id_or_url>` - Telegraph viewer only
+- `/read <id_or_url>` - Telegraph viewer only  
 - `/getpdf <id_or_url>` - PDF generation only
+- `/recipe` - Start cooking video analysis mode
 - `/help`, `/start` - Show help message
 - `/ping` - Health check
+- Video uploads - Direct video analysis for recipe extraction (up to 20MB)
 
 
 ### Key Implementation Details
@@ -61,13 +76,20 @@ yarn build
 4. **Progress Tracking**: Real-time updates during PDF generation
 5. **WASM Support**: WebAssembly modules for WEBP to PNG conversion
 6. **Rate Limiting**: Status checks limited to 10 per gallery
+7. **AI Integration**: 
+   - Google Gemini AI for advanced video analysis
+   - Chutes AI visual models for cooking video recipe extraction
+   - Webhook-based async processing for long video analysis tasks
+   - Retry mechanisms and delivery status tracking
+8. **Video Processing**: R2 storage for video files with intelligent size handling
 
 ### Environment Configuration
 
 Managed via `wrangler.toml`:
 - Bot credentials (`ENV_BOT_TOKEN`, `ENV_BOT_SECRET`)
 - R2 bucket and KV namespace bindings
-- API endpoints configuration
+- API endpoints configuration (`NH_API_URL`, `VIDEO_ANALYSIS_SERVICE_URL`)
+- AI service tokens (`CHUTES_API_TOKEN`, Google Gemini integration)
 - Node.js compatibility mode enabled
 
 ### Testing Strategy

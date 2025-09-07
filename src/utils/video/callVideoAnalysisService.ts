@@ -10,6 +10,9 @@ export interface VideoAnalysisRequest {
   videoUrl: string;
   userId?: number;
   chatId?: number;
+  botToken?: string;
+  callbackUrl?: string;
+  messageId?: number;
 }
 
 export interface VideoAnalysisResponse {
@@ -42,13 +45,24 @@ export async function callVideoAnalysisService(
       videoUrl: request.videoUrl,
       userId: request.userId,
       chatId: request.chatId,
+      hasBotToken: !!request.botToken,
+      callbackUrl: request.callbackUrl,
     });
 
-    // Prepare the request payload
+    // Prepare the request payload with callback structure for async processing
     const payload = {
       video_url: request.videoUrl,
-      user_id: request.userId,
-      chat_id: request.chatId,
+      bot_token: request.botToken,
+      callback: request.callbackUrl ? {
+        type: 'telegram' as const,
+        webhook_url: request.callbackUrl,
+        chat_id: request.chatId || 0,
+        message_id: request.messageId || 0,
+      } : undefined,
+      metadata: {
+        user_id: request.userId,
+        timestamp: Date.now(),
+      },
     };
 
     // Make the API call with retry logic

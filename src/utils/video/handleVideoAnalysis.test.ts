@@ -113,7 +113,6 @@ describe("handleVideoAnalysis", () => {
     callVideoAnalysisServiceMock
       .mockResolvedValue({
         success: true,
-        recipe: mockRecipe,
       });
 
     formatRecipeMessageMock
@@ -131,11 +130,23 @@ describe("handleVideoAnalysis", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(sendMarkdownV2TextMock).toHaveBeenCalledTimes(2); // Processing and final message
+    expect(sendMarkdownV2TextMock).toHaveBeenCalledTimes(1); // Only initial processing message
     expect(uploadVideoToR2Mock).toHaveBeenCalled();
     expect(callVideoAnalysisServiceMock).toHaveBeenCalled();
-    expect(formatRecipeMessageMock).toHaveBeenCalledWith(mockRecipe);
-    expect(editMessageTextMock).toHaveBeenCalled(); // Update processing message
+    expect(editMessageTextMock).toHaveBeenCalled(); // Update processing message to async status
+    
+    // Verify that the video analysis service was called with callback information
+    expect(callVideoAnalysisServiceMock).toHaveBeenCalledWith(
+      mockServiceUrl,
+      expect.objectContaining({
+        videoUrl: "https://test.r2.dev/videos/test.mp4",
+        userId: 789,
+        chatId: 456,
+        botToken: mockToken,
+        callbackUrl: "https://test.r2.dev/webhook/video-analysis",
+        messageId: 123,
+      })
+    );
   });
 
   it("should handle missing bot token", async () => {
@@ -410,7 +421,7 @@ describe("handleVideoAnalysis", () => {
 
     // Should still succeed despite edit failure
     expect(result.ok).toBe(true);
-    expect(sendMarkdownV2TextMock).toHaveBeenCalledTimes(2);
+    expect(sendMarkdownV2TextMock).toHaveBeenCalledTimes(1); // Only initial processing message
   });
 
   it.skip("should log processing information", async () => {
@@ -597,7 +608,7 @@ describe("handleVideoAnalysis", () => {
 
       // Should proceed with processing since it's within size limits
       expect(result.ok).toBe(true);
-      expect(sendMarkdownV2TextMock).toHaveBeenCalledTimes(2); // Processing and final messages
+      expect(sendMarkdownV2TextMock).toHaveBeenCalledTimes(1); // Only processing message
     });
   });
 

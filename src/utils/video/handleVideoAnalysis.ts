@@ -213,13 +213,25 @@ export async function handleVideoAnalysis(
 
     // Call external video analysis service
     try {
+      // Construct the callback URL for async processing
+      const callbackUrl = `${publicUrlBase}/webhook/video-analysis`;
+      
+      // Get the message ID from the processing message
+      const messageId = processingMsg.result && "message_id" in processingMsg.result
+        ? processingMsg.result.message_id
+        : 0;
+      
       const analysisResult = await callVideoAnalysisService(serviceUrl, {
         videoUrl: publicUrl,
         userId: message.from?.id,
         chatId: chatId,
+        botToken: token,
+        callbackUrl: callbackUrl,
+        messageId: messageId,
       });
 
-      if (!analysisResult.success || !analysisResult.recipe) {
+      // With async callback processing, the service should return job acceptance
+      if (!analysisResult.success) {
         // Handle different error types with specific user guidance
         if (analysisResult.error_type === 'size_context_limit') {
           let errorDetails = '';
@@ -239,39 +251,38 @@ export async function handleVideoAnalysis(
         throw new Error(analysisResult.error || "Could not extract recipe from the video. Please ensure the video clearly shows cooking steps and ingredients.");
       }
 
-      const recipe = analysisResult.recipe;
-
-      logger.info("Successfully extracted recipe from video", {
-        title: recipe.title,
+      // For async processing, success means the job was accepted
+      // The actual recipe will be delivered via webhook callback
+      logger.info("Video analysis job accepted for async processing", {
         chatId,
+        callbackUrl: callbackUrl,
       });
 
-      // Format and send response
-      const formattedRecipe = formatRecipeMessage(recipe);
-
-      // Delete processing message
+      // Update status message to indicate async processing
       if (processingMsg.result && "message_id" in processingMsg.result) {
-        await fetch(
-          apiUrl(token, "deleteMessage", {
-            chat_id: chatId,
-            message_id: processingMsg.result.message_id,
-          }),
-        );
+        const messageId = processingMsg.result.message_id;
+        try {
+          await editMessageText(
+            {
+              chat_id: chatId,
+              message_id: messageId,
+              text: "🎬 Video analysis job accepted\\!\n\n⏳ Processing in the background\\.\\.\\.\n📱 I'll send you the recipe when it's ready\\.\n\nThis may take 1\\-3 minutes depending on video length\\.",
+            },
+            token,
+          );
+        } catch {
+          // Ignore edit failure, continue with processing
+        }
       }
 
-      // Send the formatted recipe
-      const result = await sendMarkdownV2Text(token, chatId, formattedRecipe);
-
-      // Optionally save to artifact or create a document
-      if (recipe.ingredients.length > 5 || recipe.instructions.length > 5) {
-        // Could create a PDF or save to storage for later retrieval
-        logger.info("Recipe is detailed, could save for future reference", {
-          ingredientCount: recipe.ingredients.length,
-          instructionCount: recipe.instructions.length,
-        });
-      }
-
-      return result;
+      // Return success but don't send recipe yet - it will come via webhook
+      return {
+        ok: true,
+        description: "Video analysis job accepted for processing",
+        result: {
+          message_id: messageId,
+        }
+      };
     } catch (serviceError) {
       // Handle specific service errors
       const errorMessage = serviceError instanceof Error ? serviceError.message : String(serviceError);
