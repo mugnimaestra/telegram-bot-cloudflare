@@ -87,6 +87,7 @@ export async function handleVideoJobWebhook(
           chat_id: chat_id,
           message_id: message_id,
           text: formattedRecipe,
+          parse_mode: "MarkdownV2",
         },
         bot_token,
       );

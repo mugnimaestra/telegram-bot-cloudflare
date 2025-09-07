@@ -243,13 +243,345 @@ Note: The `CHUTES_API_TOKEN` is required to use the cooking video recipe extract
 
 ### Testing
 
-The project uses Vitest for testing. Available test commands:
+This project uses Vitest as its testing framework with specialized utilities and practices optimized for serverless environments and agentic processes.
+
+#### Test Commands
+
 ```bash
-yarn test          # Run tests in watch mode
-yarn test:ui      # Run tests with UI
-yarn test:coverage # Run tests with coverage
-yarn test:run     # Run tests once
+# Development and debugging
+yarn test              # Run tests in watch mode (for development)
+yarn test:ui          # Run tests with interactive UI
+yarn test:coverage    # Run tests with coverage report
+
+# Production and CI/CD
+yarn test:run         # Run tests once and exit (CRITICAL for automation)
 ```
+
+#### Test Organization and Structure
+
+The project follows a co-located testing pattern for better maintainability:
+
+```
+src/
+├── utils/
+│   ├── video/
+│   │   ├── analyzeVideo.ts           # Source code
+│   │   └── analyzeVideo.test.ts      # Test file
+│   ├── nh/
+│   │   ├── fetchNHData.ts            # Source code
+│   │   └── fetchNHData.test.ts       # Test file
+│   └── test/                         # Shared testing utilities
+│       ├── mockR2Bucket.ts           # R2 bucket mocking
+│       └── nock.ts                   # Enhanced HTTP mocking
+```
+
+**Key Features:**
+- **Co-located tests**: Test files live alongside their source files
+- **Shared utilities**: Common testing tools centralized for reuse
+- **Environment-aware**: Specialized mocks for Cloudflare Workers components
+- **Integration-focused**: Tests verify both unit behavior and system integration
+
+#### Testing Utilities
+
+##### R2 Bucket Mocking
+```typescript
+import { mockR2Bucket } from "@/utils/test/mockR2Bucket";
+
+// Mock all R2 operations (get, put, delete, list, etc.)
+mockR2Bucket.put.mockResolvedValueOnce({
+  etag: "test-etag",
+  key: "test-key",
+});
+```
+
+##### Enhanced HTTP Mocking
+```typescript
+import nock from "@/utils/test/nock";
+
+// Automatic CORS handling and debug logging
+const scope = nock("https://api.example.com")
+  .post("/analyze")
+  .matchHeader("content-type", "application/json")
+  .reply(200, { success: true });
+```
+
+**Features:**
+- **Automatic CORS**: Pre-configured for cross-origin requests
+- **Debug logging**: Built-in request/response logging
+- **No-match tracking**: Detailed logging for unexpected requests
+- **Easy cleanup**: Centralized cleanup utilities
+
+#### Coverage Reporting
+
+The project provides comprehensive coverage reporting:
+
+```bash
+yarn test:coverage
+```
+
+**Output Formats:**
+- **Text**: Console summary for quick checks
+- **JSON**: Machine-readable for CI/CD integration
+- **HTML**: Interactive report at `coverage/index.html`
+
+**Coverage Targets:**
+- Maintain >80% coverage for critical business logic
+- Focus on error handling and edge cases
+- Exclude configuration files and type definitions
+
+#### CI/CD Integration
+
+**Critical for Agentic Processes:**
+```bash
+# ❌ NEVER use this in CI/CD - runs indefinitely in watch mode
+yarn test
+
+# ✅ ALWAYS use this in CI/CD and automation
+yarn test:run
+```
+
+**Why this matters:**
+- The default `yarn test` command runs in watch mode, monitoring file changes and never exiting
+- Agentic processes (CI/CD pipelines, automation scripts, AI assistants) will hang waiting for termination
+- The `--run` flag ensures tests run exactly once and exit with proper status codes
+- Essential for any automated workflow that needs to continue after tests complete
+
+**Example CI/CD Configuration:**
+```yaml
+# GitHub Actions example
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: yarn install
+      - run: yarn test:run           # Single execution for CI
+      - run: yarn test:coverage      # Generate coverage
+      - uses: codecov/codecov-action@v3
+```
+
+#### Performance Testing
+
+**Optimization Strategies:**
+1. **Mock external dependencies** to eliminate network latency
+2. **Use fake timers** for time-dependent operations
+3. **Proper cleanup** to prevent test pollution
+4. **Parallel execution** leveraging Vitest's built-in parallelization
+
+**Example Performance-Optimized Test:**
+```typescript
+describe("VideoAnalysis", () => {
+  beforeEach(() => {
+    _nock.cleanAll();           // Clean HTTP mocks
+    vi.clearAllMocks();         // Clear mock history
+    vi.useFakeTimers();         // Mock timers
+  });
+
+  afterEach(() => {
+    _nock.cleanAll();           // Ensure cleanup
+    vi.useRealTimers();         // Restore real timers
+  });
+
+  it("should handle timeouts efficiently", async () => {
+    const promise = analyzeVideo(videoData);
+    vi.advanceTimersByTime(30000); // Fast-forward 30 seconds
+    
+    await expect(promise).rejects.toThrow("Timeout");
+  });
+});
+```
+
+#### Debugging Tests
+
+**Common Debugging Approaches:**
+
+1. **Run specific tests:**
+```bash
+yarn test:run --grep "should handle timeouts"
+yarn test:run videoAnalysis.test.ts
+```
+
+2. **Enable verbose logging:**
+```typescript
+// Tests include built-in debug logging
+// Mock logger to capture debug output
+vi.mock("@/utils/logger", () => ({
+  logger: {
+    debug: vi.fn(),
+    error: vi.fn(),
+    // ...
+  },
+}));
+```
+
+3. **VS Code Debug Configuration:**
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Current Test File",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": ["run", "${relativeFile}"],
+      "console": "integratedTerminal"
+    }
+  ]
+}
+```
+
+#### Best Practices for Maintainable Tests
+
+**Test Structure:**
+1. **Arrange-Act-Assert**: Clear separation of setup, execution, verification
+2. **Descriptive names**: Use `should` or `it` to describe expected behavior
+3. **Test independence**: Each test should work in isolation
+4. **Minimal mocking**: Mock only what's necessary
+
+**Example Maintainable Test:**
+```typescript
+describe("VideoAnalysisService", () => {
+  const mockRequest = {
+    videoUrl: "https://test.r2.dev/videos/test.mp4",
+    userId: 123,
+  };
+
+  beforeEach(() => {
+    _nock.cleanAll();
+    vi.clearAllMocks();
+  });
+
+  it("should successfully analyze video", async () => {
+    // Arrange - Setup
+    const mockRecipe = { title: "Test Recipe", /* ... */ };
+    const scope = nock("https://api.example.com")
+      .post("/analyze")
+      .reply(200, { success: true, recipe: mockRecipe });
+
+    // Act - Execute
+    const result = await callVideoAnalysisService("https://api.example.com", mockRequest);
+
+    // Assert - Verify
+    expect(result.success).toBe(true);
+    expect(result.recipe).toEqual(mockRecipe);
+  });
+});
+```
+
+#### Common Pitfalls to Avoid
+
+**1. Watch Mode in Automation**
+```bash
+# ❌ Causes automation to hang indefinitely
+yarn test
+
+# ✅ Proper for CI/CD and scripts
+yarn test:run
+```
+
+**2. Inadequate Mock Cleanup**
+```typescript
+// ❌ Incomplete cleanup - causes test pollution
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Missing HTTP mock cleanup
+});
+
+// ✅ Comprehensive cleanup
+beforeEach(() => {
+  _nock.cleanAll();     // HTTP mocks
+  vi.clearAllMocks();   // Mock history
+  vi.resetAllMocks();   // Mock implementations
+});
+```
+
+**3. Missing Error Scenario Testing**
+```typescript
+// ❌ Only testing happy path
+it("should return recipe", async () => {
+  const scope = nock(api).post("/analyze").reply(200, recipe);
+  const result = await analyze(request);
+  expect(result.success).toBe(true);
+});
+
+// ✅ Comprehensive error testing
+it("should handle network failures", async () => {
+  const scope = nock(api).post("/analyze").replyWithError("Network error");
+  const result = await analyze(request);
+  
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Network error");
+});
+```
+
+**4. Improper Async Handling**
+```typescript
+// ❌ Missing proper async handling
+it("should timeout", () => {
+  const promise = analyze(request);
+  expect(promise).rejects.toThrow(); // Not awaited properly
+});
+
+// ✅ Proper async test with fake timers
+it("should handle timeouts", async () => {
+  vi.useFakeTimers();
+  const promise = analyze(request);
+  vi.advanceTimersByTime(30000);
+  
+  await expect(promise).rejects.toThrow("Timeout");
+  vi.useRealTimers();
+});
+```
+
+**5. Over-mocking Dependencies**
+```typescript
+// ❌ Mocking too much functionality
+vi.mock("@/utils/logger", () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    // Over-engineered mock
+  },
+}));
+
+// ✅ Minimal, focused mocking
+vi.mock("@/utils/logger", () => ({
+  logger: {
+    error: vi.fn(), // Only mock what the test needs
+  },
+}));
+```
+
+**6. Ignoring Environment Constraints**
+```typescript
+// ❌ Assuming local file system behavior
+it("should save file", () => {
+  expect(fs.existsSync).toBe(true); // Fails in serverless
+});
+
+// ✅ Environment-aware testing
+it("should store in R2 bucket", () => {
+  mockR2Bucket.put.mockResolvedValueOnce({ etag: "test-etag" });
+  
+  uploadVideo(videoData);
+  expect(mockR2Bucket.put).toHaveBeenCalledWith(
+    "test-key",
+    expect.any(Object),
+    { httpMetadata: { contentType: "video/mp4" } }
+  );
+});
+```
+
+#### Additional Resources
+
+- [Vitest Documentation](https://vitest.dev/)
+- [Nock HTTP Mocking](https://github.com/nock/nock)
+- [Cloudflare Workers Testing Guide](https://developers.cloudflare.com/workers/wrangler/testing/)
+- [Test Coverage Best Practices](https://kentcdodds.com/blog/how-to-know-what-to-test)
 
 ### Deployment
 
