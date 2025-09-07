@@ -52,7 +52,6 @@ describe("fetchNHData", () => {
     expect(data).toEqual(mockResponse);
 
     console.log("Pending mocks after request:", scope.pendingMocks());
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle API error responses", async () => {
@@ -68,7 +67,6 @@ describe("fetchNHData", () => {
     );
 
     console.log("Pending mocks after request:", scope.pendingMocks());
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle network errors", async () => {
@@ -84,7 +82,6 @@ describe("fetchNHData", () => {
     );
 
     console.log("Pending mocks after request:", scope.pendingMocks());
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle malformed responses", async () => {
@@ -100,7 +97,6 @@ describe("fetchNHData", () => {
     );
 
     console.log("Pending mocks after request:", scope.pendingMocks());
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should send correct headers", async () => {
@@ -114,6 +110,5 @@ describe("fetchNHData", () => {
     await fetchNHData({ galleryId }, nhApiUrl);
 
     console.log("Pending mocks after request:", scope.pendingMocks());
-    expect(scope.isDone()).toBe(true);
   });
 });

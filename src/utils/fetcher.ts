@@ -1,3 +1,5 @@
+import { logger } from "./logger";
+
 interface FetcherOptions {
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   url: string;
@@ -24,6 +26,13 @@ export async function fetcher<T>({
   if (body) {
     options.body = JSON.stringify(body);
   }
+
+  logger.debug("fetcher called with", {
+    url: `${baseUrl}${url}`,
+    method,
+    headers: options.headers,
+    body: options.body,
+  });
 
   const response = await fetch(`${baseUrl}${url}`, options);
 

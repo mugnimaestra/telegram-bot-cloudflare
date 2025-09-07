@@ -150,16 +150,10 @@ export async function analyzeVideoWithGemini(
     throw new Error(getUsageLimitMessage(currentUsage || undefined));
   }
 
-  // Prevent excessive memory usage from large base64 strings
-  // Cloudflare Workers have strict memory limits - be very conservative
-  // Reduced limit to prevent log overflow and API timeouts
-  if (videoBase64.length > 5 * 1024 * 1024) { // 5MB base64 limit for safety
-    logger.error("Video base64 too large for processing", {
-      sizeMB: Math.round(videoBase64.length / 1024 / 1024 * 100) / 100,
-      maxSizeMB: 5,
-    });
-    throw new Error("Video too large for processing. Please use a video under 3MB.");
-  }
+  // Base64 size validation is now handled by the video analyzer service
+  logger.info("Video base64 size", {
+    sizeMB: Math.round(videoBase64.length / 1024 / 1024 * 100) / 100
+  });
 
   logger.info("Starting video analysis with Google Gemini", {
     videoSizeMB: Math.round(videoBase64.length / 1024 / 1024 * 100) / 100,
@@ -533,7 +527,7 @@ function extractPartialRecipe(content: string): CookingRecipe | null {
  */
 export function validateVideoInput(
   videoBase64: string,
-  maxSizeBytes: number = 20 * 1024 * 1024,
+  maxSizeBytes: number = 100 * 1024 * 1024, // Increased to 100MB, but validation is primarily handled by the analyzer service
 ): boolean {
   if (!videoBase64) {
     logger.error("Video validation failed: No video data provided");

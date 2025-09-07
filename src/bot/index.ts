@@ -21,9 +21,26 @@ import { sendDocument } from "@/utils/telegram/fetchers/sendDocument"; // Added 
 import { editMessageText } from "@/utils/telegram/fetchers/editMessageText"; // Added for editing status messages
 import { handleVideoAnalysis } from "@/utils/video/handleVideoAnalysis";
 import { handleVideoAnalysisAsync } from "@/utils/video/handleVideoAnalysisAsync";
-import { checkJobStatus, formatJobStatusMessage } from "@/utils/video/checkJobStatus";
-import { handleVideoJobWebhook, isValidWebhookPayload } from "@/utils/video/videoJobWebhook";
+import {
+  checkJobStatus,
+  formatJobStatusMessage,
+  formatWebhookOnlyStatusMessage,
+} from "@/utils/video/checkJobStatus";
+import { getWebhookStatus } from "@/utils/video/getWebhookStatus";
+import {
+  handleVideoJobWebhook,
+  isValidWebhookPayload,
+} from "@/utils/video/videoJobWebhook";
 import type { VideoAnalysisWebhookPayload } from "@/types/videoJob";
+import { logger } from "@/utils/logger";
+import {
+  handleRetryWebhookCommand,
+  handleDeadLetterQueueCommand,
+  handleRetryDeadLetterCommand,
+  handleClearDeadLetterCommand,
+  handleWebhookCallbackQuery,
+  sendWebhookStatusWithActions
+} from "@/utils/video/handleWebhookCommands";
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
@@ -71,7 +88,9 @@ async function getGeminiUsageInfo(namespace?: any): Promise<string> {
     const usage: UsageData = JSON.parse(usageData);
     const remaining = Math.max(0, GEMINI_TIER_1_DAILY_LIMIT - usage.count);
     const resetTime = new Date(usage.resetTime * 1000);
-    const hoursUntilReset = Math.ceil((resetTime.getTime() - Date.now()) / (1000 * 60 * 60));
+    const hoursUntilReset = Math.ceil(
+      (resetTime.getTime() - Date.now()) / (1000 * 60 * 60),
+    );
 
     let statusEmoji = "✅";
     let statusText = "Good standing";
@@ -98,9 +117,8 @@ ${statusEmoji} *Status:* ${statusText}
 • Each cooking video analysis counts as 1 request
 • Limit resets daily at midnight UTC
 • Monitor usage: https://makersuite.google.com/app/usage`;
-
   } catch (error) {
-    console.error("[Usage] Failed to get usage data:", error);
+    logger.error("[Usage] Failed to get usage data", { error });
     return `❌ *Usage Check Failed*
 
 Unable to retrieve usage statistics. This might be due to:
@@ -132,13 +150,24 @@ Example: \`/getpdf 546408\` or \`/getpdf https://nhentai\\.net/g/546408/\`
 
 🍳 *Cooking Video Analysis:*
 \`/recipe\` - Start cooking video analysis mode
-• Upload any cooking video (max 10MB)
+• Upload any cooking video
 • AI extracts complete recipes automatically
 • Includes ingredients, steps, and techniques
 • Asynchronous job-based processing
 \`/status <job_id>\` - Check video analysis job status
 • View progress and completion status
 • Get job details and estimated time remaining
+• Includes webhook delivery information
+
+📡 *Webhook Management:*
+\`/webhook_status <job_id>\` - Check webhook delivery status
+• View webhook delivery attempts and timestamps
+• See error details for failed deliveries
+• Monitor retry attempts and scheduling
+\`/retry_webhook <job_id>\` - Manually retry failed webhook delivery
+• Trigger immediate retry for failed webhooks
+• Reset retry counters and attempt delivery
+• Available for failed webhooks with remaining attempts
 
 📊 *Usage Monitoring:*
 \`/usage\` - Check Gemini API usage statistics
@@ -154,13 +183,18 @@ Example: \`/getpdf 546408\` or \`/getpdf https://nhentai\\.net/g/546408/\`
 • Markdown formatted responses
 • Group chat support
 • AI\\-powered cooking video analysis
+• Enhanced webhook delivery tracking
+• Automatic retry with exponential backoff
+• Manual webhook retry capabilities
 
 *Limits:*
 • PDF status checks: ${STATUS_CHECK_LIMIT} times per gallery
 • Gemini API: ${GEMINI_TIER_1_DAILY_LIMIT} requests per day (resets at midnight UTC)
-• Video size: 10MB maximum for analysis (R2 storage limits)
+• Video size: Determined by video analyzer service
+• Webhook retries: 3 attempts maximum (configurable)
+• Webhook status storage: 7 days
 
-Bot Version: 1\\.2\\.0`;
+Bot Version: 1\\.3\\.0`;
 }
 
 const app = new Hono<{
@@ -172,7 +206,7 @@ const app = new Hono<{
 app.use("*", async (c, next) => {
   // Check bucket binding
   if (!c.env.BUCKET || typeof c.env.BUCKET.get !== "function") {
-    console.error("[Error] R2 Bucket binding is not properly initialized");
+    logger.error("[Error] R2 Bucket binding is not properly initialized");
   }
   await next();
 });
@@ -185,12 +219,12 @@ app.use("*", async (c, next) => {
 
 // Video analysis job completion webhook
 app.post("/webhook/video-analysis", async (c) => {
-  console.log("[Video Job Webhook] Received completion notification");
+  logger.info("[Video Job Webhook] Received completion notification");
 
   // Verify webhook secret
   const providedSecret = c.req.header("X-Webhook-Secret");
   if (!providedSecret) {
-    console.error("[Video Job Webhook] Missing webhook secret");
+    logger.error("[Video Job Webhook] Missing webhook secret");
     return new Response("Missing webhook secret", { status: 401 });
   }
 
@@ -198,13 +232,13 @@ app.post("/webhook/video-analysis", async (c) => {
   try {
     payload = await c.req.json();
   } catch (error) {
-    console.error("[Video Job Webhook] Invalid JSON:", error);
+    logger.error("[Video Job Webhook] Invalid JSON", { error });
     return new Response("Invalid JSON", { status: 400 });
   }
 
   // Validate payload structure
   if (!isValidWebhookPayload(payload)) {
-    console.error("[Video Job Webhook] Invalid payload structure:", payload);
+    logger.error("[Video Job Webhook] Invalid payload structure", { payload });
     return new Response("Invalid payload structure", { status: 400 });
   }
 
@@ -217,17 +251,19 @@ app.post("/webhook/video-analysis", async (c) => {
   );
 
   if (!result.success) {
-    console.error("[Video Job Webhook] Processing failed:", result.error);
+    logger.error("[Video Job Webhook] Processing failed", {
+      error: result.error,
+    });
     return new Response(result.error || "Processing failed", { status: 400 });
   }
 
-  console.log("[Video Job Webhook] Successfully processed job completion");
+  logger.info("[Video Job Webhook] Successfully processed job completion");
   return new Response("OK", { status: 200 });
 });
 
 // Bot webhook handler
 app.post(WEBHOOK, async (c) => {
-  console.log("[Webhook] Received update");
+  logger.info("[Webhook] Received update");
 
   if (
     c.req.header("X-Telegram-Bot-Api-Secret-Token") !== c.env.ENV_BOT_SECRET
@@ -239,29 +275,28 @@ app.post(WEBHOOK, async (c) => {
   try {
     update = await c.req.json();
   } catch (error) {
-    console.error("[Webhook] Invalid JSON:", error);
+    logger.error("[Webhook] Invalid JSON", { error });
     return new Response("Bad Request", { status: 400 });
   }
 
   try {
     if (update.callback_query) {
-      console.log(
-        "[Webhook] Processing callback query:",
-        update.callback_query.data,
-      );
+      logger.info("[Webhook] Processing callback query", {
+        data: update.callback_query.data,
+      });
       const success = await handleCallbackQuery(
         c.env.ENV_BOT_TOKEN,
         update.callback_query,
         c.env.NH_API_URL,
       );
       if (!success) {
-        console.error("[Webhook] Error handling callback query");
+        logger.error("[Webhook] Error handling callback query");
         return new Response("OK", { status: 200 }); // Still return 200 to acknowledge receipt
       }
       return new Response("OK", { status: 200 });
     } else if (update.message?.text?.startsWith("/nh")) {
-      console.log("[Webhook] Processing command: /nh");
-      console.log("[Webhook] Bucket binding status:", {
+      logger.info("[Webhook] Processing command: /nh");
+      logger.info("[Webhook] Bucket binding status", {
         hasBucket: !!c.env.BUCKET,
         bucketType: typeof c.env.BUCKET,
         bucketKeys: Object.keys(c.env.BUCKET || {}),
@@ -276,19 +311,17 @@ app.post(WEBHOOK, async (c) => {
           c.env.NH_API_URL,
         );
         if (!response.ok) {
-          console.error(
-            "[Webhook] Error handling NH command:",
-            response.description,
-          );
+          logger.error("[Webhook] Error handling NH command", {
+            description: response.description,
+          });
         }
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error("[Webhook] Error handling NH command:", error);
+        logger.error("[Webhook] Error handling NH command", { error });
         return new Response("OK", { status: 200 });
       }
-
     } else if (update.message?.text?.startsWith("/read")) {
-      console.log("[Webhook] Processing command: /read");
+      logger.info("[Webhook] Processing command: /read");
       try {
         if (!update.message) {
           throw new Error("Message is missing");
@@ -300,7 +333,7 @@ app.post(WEBHOOK, async (c) => {
 
         if (!text) {
           // Add check for text
-          console.error("[Webhook] /read command received without text.");
+          logger.error("[Webhook] /read command received without text");
           return new Response("OK", { status: 200 }); // Or send an error message
         }
 
@@ -355,7 +388,7 @@ app.post(WEBHOOK, async (c) => {
 
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error("[Webhook] Error handling /read command:", error);
+        logger.error("[Webhook] Error handling /read command", { error });
         // Send generic error message
         if (update.message?.chat?.id && c.env.ENV_BOT_TOKEN) {
           await sendPlainText(
@@ -367,7 +400,7 @@ app.post(WEBHOOK, async (c) => {
         return new Response("OK", { status: 200 }); // Acknowledge receipt even on error
       }
     } else if (update.message?.text?.startsWith("/getpdf")) {
-      console.log("[Webhook] Processing command: /getpdf");
+      logger.info("[Webhook] Processing command: /getpdf");
       let statusMessageId: number | null = null; // Variable to store the status message ID
       const message = update.message; // Ensure message is defined for the scope
       const chatId = message?.chat?.id;
@@ -380,7 +413,7 @@ app.post(WEBHOOK, async (c) => {
         const text = message.text;
 
         if (!text) {
-          console.error("[Webhook] /getpdf command received without text.");
+          logger.error("[Webhook] /getpdf command received without text");
           return new Response("OK", { status: 200 });
         }
 
@@ -411,13 +444,13 @@ app.post(WEBHOOK, async (c) => {
           "message_id" in initialMessageResponse.result
         ) {
           statusMessageId = initialMessageResponse.result.message_id;
-          console.log(
-            `[Webhook /getpdf] Initial status message sent (ID: ${statusMessageId})`,
-          );
+          logger.info("[Webhook /getpdf] Initial status message sent", {
+            statusMessageId,
+          });
         } else {
-          console.error(
-            `[Webhook /getpdf] Failed to send initial status message or get its ID for gallery ${galleryId}. Response:`,
-            initialMessageResponse,
+          logger.error(
+            "[Webhook /getpdf] Failed to send initial status message or get its ID",
+            { galleryId, response: initialMessageResponse },
           );
           // Proceed without progress updates, or send a final error? For now, proceed.
           // await sendPlainText(botToken, chatId, `❌ Error: Could not initialize status updates for gallery ${galleryId}.`);
@@ -446,9 +479,10 @@ app.post(WEBHOOK, async (c) => {
               // Keep the last known good status or show a generic error? Let's show the specific error.
               // Note: This might overwrite previous progress. Consider appending errors instead.
               progressText = `⚠️ Error during PDF generation for ${galleryId}: ${status.error || "Unknown error"}`;
-              console.warn(
-                `[Webhook /getpdf Progress Error] Gallery ${galleryId}: ${status.error}`,
-              );
+              logger.warn("[Webhook /getpdf Progress Error]", {
+                galleryId,
+                error: status.error,
+              });
               break;
           }
 
@@ -464,10 +498,11 @@ app.post(WEBHOOK, async (c) => {
               botToken,
             );
           } catch (editError) {
-            console.error(
-              `[Webhook /getpdf] Failed to edit status message ${statusMessageId} for gallery ${galleryId}:`,
-              editError,
-            );
+            logger.error("[Webhook /getpdf] Failed to edit status message", {
+              statusMessageId,
+              galleryId,
+              error: editError,
+            });
             // Stop trying to edit if it fails? Maybe disable further updates.
             statusMessageId = null; // Stop further edits on error
           }
@@ -538,9 +573,10 @@ app.post(WEBHOOK, async (c) => {
         // --- Final Status Update ---
         if (!sendResult.ok) {
           const errorMsg = `❌ Error: Failed to send the generated PDF for gallery ${galleryId}.`;
-          console.error(
-            `[Webhook /getpdf] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}`,
-          );
+          logger.error("[Webhook /getpdf] Failed to send PDF", {
+            galleryId,
+            status: sendResult.ok,
+          });
           // Corrected editMessageText call
           if (statusMessageId)
             await editMessageText(
@@ -550,9 +586,7 @@ app.post(WEBHOOK, async (c) => {
           else await sendPlainText(botToken, chatId, errorMsg); // Send separately if status updates failed
         } else {
           const successMsg = `✅ Successfully sent PDF for gallery ${galleryId} (${fileName}).`;
-          console.log(
-            `[Webhook /getpdf] Successfully sent PDF for ${galleryId}`,
-          );
+          logger.info("[Webhook /getpdf] Successfully sent PDF", { galleryId });
           if (statusMessageId) {
             // Option 1: Edit final status
             // Corrected editMessageText call
@@ -578,7 +612,7 @@ app.post(WEBHOOK, async (c) => {
         return new Response("OK", { status: 200 });
       } catch (error) {
         // This catch block now only handles errors *before* waitUntil
-        console.error("[Webhook /getpdf] Initial processing error:", error);
+        logger.error("[Webhook /getpdf] Initial processing error", { error });
         const errorMsg = `🆘 An unexpected error occurred before starting PDF generation.`;
         // Attempt to send an error message if possible
         if (chatId && botToken) {
@@ -598,9 +632,9 @@ app.post(WEBHOOK, async (c) => {
               await sendPlainText(botToken, chatId, errorMsg);
             }
           } catch (sendError) {
-            console.error(
-              "[Webhook /getpdf] Failed to send initial processing error message:",
-              sendError,
+            logger.error(
+              "[Webhook /getpdf] Failed to send initial processing error message",
+              { error: sendError },
             );
           }
         }
@@ -692,9 +726,10 @@ app.post(WEBHOOK, async (c) => {
                 break;
               case "error":
                 progressText = `⚠️ Error during PDF generation for ${galleryId}: ${status.error || "Unknown error"}`;
-                console.warn(
-                  `[Webhook /getpdf Task Progress Error] Gallery ${galleryId}: ${status.error}`,
-                );
+                logger.warn("[Webhook /getpdf Task Progress Error]", {
+                  galleryId,
+                  error: status.error,
+                });
                 break;
             }
 
@@ -708,9 +743,9 @@ app.post(WEBHOOK, async (c) => {
                 botToken,
               );
             } catch (editError) {
-              console.error(
-                `[Webhook /getpdf Task] Failed to edit status message ${taskStatusMessageId} for gallery ${galleryId}:`,
-                editError,
+              logger.error(
+                "[Webhook /getpdf Task] Failed to edit status message",
+                { taskStatusMessageId, galleryId, error: editError },
               );
               taskStatusMessageId = null; // Stop further edits on error
             }
@@ -761,9 +796,10 @@ app.post(WEBHOOK, async (c) => {
           // --- Final Status Update ---
           if (!sendResult.ok) {
             const errorMsg = `❌ Error: Failed to send the generated PDF for gallery ${galleryId}. The file may be too large or invalid.`;
-            console.error(
-              `[Webhook /getpdf Task] Failed to send PDF for ${galleryId}. Status: ${sendResult.ok}`,
-            );
+            logger.error("[Webhook /getpdf Task] Failed to send PDF", {
+              galleryId,
+              status: sendResult.ok,
+            });
             if (taskStatusMessageId)
               await editMessageText(
                 {
@@ -776,9 +812,9 @@ app.post(WEBHOOK, async (c) => {
             else await sendPlainText(botToken, chatId, errorMsg); // Send separately if status updates failed
           } else {
             const successMsg = `✅ Successfully sent PDF for gallery ${galleryId} (${fileName}).`;
-            console.log(
-              `[Webhook /getpdf Task] Successfully sent PDF for ${galleryId}`,
-            );
+            logger.info("[Webhook /getpdf Task] Successfully sent PDF", {
+              galleryId,
+            });
             if (taskStatusMessageId) {
               await editMessageText(
                 {
@@ -795,7 +831,9 @@ app.post(WEBHOOK, async (c) => {
           }
         } catch (taskError) {
           // Catch errors within the async task
-          console.error("[Webhook /getpdf Task] Unhandled error:", taskError);
+          logger.error("[Webhook /getpdf Task] Unhandled error", {
+            error: taskError,
+          });
           const errorMsg = `🆘 An unexpected error occurred during PDF generation for gallery ${galleryId}.`;
           // Try to edit the status message if possible, otherwise log (avoid sending new message from background task on generic error)
           if (taskStatusMessageId && chatId && botToken) {
@@ -809,9 +847,9 @@ app.post(WEBHOOK, async (c) => {
                 botToken,
               );
             } catch (editError) {
-              console.error(
-                "[Webhook /getpdf Task] Failed to edit final error status message:",
-                editError,
+              logger.error(
+                "[Webhook /getpdf Task] Failed to edit final error status message",
+                { error: editError },
               );
             }
           }
@@ -828,18 +866,20 @@ app.post(WEBHOOK, async (c) => {
       // --- Return immediate response to Telegram ---
       return new Response("OK", { status: 200 });
     } else if (update.message?.text?.startsWith("/status")) {
-      console.log("[Webhook] Status command received");
-      
-      const jobId = update.message.text.split(' ')[1];
-      
+      logger.info("[Webhook] Status command received");
+
+      const jobId = update.message.text.split(" ")[1];
+
       if (!jobId) {
         await sendMarkdownV2Text(
           c.env.ENV_BOT_TOKEN,
           update.message.chat.id,
           "🔍 *Job Status Check*\n\n" +
-          "Please provide a job ID:\n" +
-          "`/status <job_id>`\n\n" +
-          "Example: `/status abc12345`",
+            "Please provide a job ID:\n" +
+            "`/status <job_id>`\n\n" +
+            "Example: `/status abc12345`\n\n" +
+            "💡 *Other commands:*\n" +
+            "• Check webhook status: `/webhook_status <job_id>`",
         );
         return new Response("OK", { status: 200 });
       }
@@ -848,6 +888,7 @@ app.post(WEBHOOK, async (c) => {
         const statusResult = await checkJobStatus(
           c.env.VIDEO_ANALYSIS_SERVICE_URL,
           jobId,
+          c.env.NAMESPACE,
         );
 
         if (!statusResult.success || !statusResult.job) {
@@ -855,38 +896,356 @@ app.post(WEBHOOK, async (c) => {
             c.env.ENV_BOT_TOKEN,
             update.message.chat.id,
             `❌ *Job Not Found*\n\n` +
-            `Job ID: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, '\\$&')}\`\n\n` +
-            `This job may have:\n` +
-            `• Already completed and been cleaned up\n` +
-            `• Expired (jobs are kept for 24 hours)\n` +
-            `• Never existed\n\n` +
-            `💡 Try sending a new video for analysis`,
+              `Job ID: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\`\n\n` +
+              `This job may have:\n` +
+              `• Already completed and been cleaned up\n` +
+              `• Expired (jobs are kept for 24 hours)\n` +
+              `• Never existed\n\n` +
+              `💡 *Try:*\n` +
+              `• Check webhook status: /webhook_status ${jobId}\n` +
+              `• Send a new video for analysis`,
           );
         } else {
-          const formattedStatus = formatJobStatusMessage(statusResult.job);
+          const formattedStatus = formatJobStatusMessage(statusResult.job, statusResult.webhookStatus);
+          let replyMarkup: any = undefined;
+          
+          // Add inline keyboard if webhook status allows for retry actions
+          if (statusResult.webhookStatus) {
+            // Import the function to create webhook action keyboard
+            const { createWebhookActionKeyboard } = await import("../utils/video/handleWebhookCommands");
+            const keyboardJson = createWebhookActionKeyboard(statusResult.webhookStatus);
+            replyMarkup = JSON.parse(keyboardJson);
+          }
+          
           await sendMarkdownV2Text(
             c.env.ENV_BOT_TOKEN,
             update.message.chat.id,
-            formattedStatus.replace(/[_*\[\]()~`>#+=|{}.!-]/g, '\\$&'),
+            formattedStatus.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&"),
+            undefined,
+            replyMarkup
           );
         }
       } catch (error) {
-        console.error("[Webhook] Error checking job status:", error);
+        logger.error("[Webhook] Error checking job status", { error });
         await sendMarkdownV2Text(
           c.env.ENV_BOT_TOKEN,
           update.message.chat.id,
           `❌ *Status Check Failed*\n\n` +
-          `Unable to check status for job: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, '\\$&')}\`\n\n` +
-          `This might be due to:\n` +
-          `• Temporary service issue\n` +
-          `• Network connectivity problem\n\n` +
-          `Please try again in a few minutes\\.`,
+            `Unable to check status for job: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\`\n\n` +
+            `This might be due to:\n` +
+            `• Temporary service issue\n` +
+            `• Network connectivity problem\n\n` +
+            `💡 *Try:*\n` +
+            `• Check webhook status: /webhook_status ${jobId}\n` +
+            `Please try again in a few minutes\\.`,
+        );
+      }
+
+      return new Response("OK", { status: 200 });
+    } else if (update.message?.text?.startsWith("/webhook_status")) {
+      logger.info("[Webhook] Webhook status command received");
+
+      const jobId = update.message.text.split(" ")[1];
+
+      if (!jobId) {
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "📡 *Webhook Status Check*\n\n" +
+            "Please provide a job ID:\n" +
+            "`/webhook_status <job_id>`\n\n" +
+            "Example: `/webhook_status abc12345`\n\n" +
+            "💡 *Other commands:*\n" +
+            "• Check job status: `/status <job_id>`\n" +
+            "• Retry webhook: `/retry_webhook <job_id>`",
+        );
+        return new Response("OK", { status: 200 });
+      }
+
+      try {
+        if (!c.env.NAMESPACE) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            `❌ *Webhook Status Unavailable*\n\n` +
+              `Webhook status tracking is not configured\\.\n\n` +
+              `This feature requires KV storage to be properly configured\\.\n\n` +
+              `💡 *Try:*\n` +
+              `• Check job status: /status ${jobId}\n` +
+              `• Contact bot administrator for support`,
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const webhookStatusResult = await getWebhookStatus(jobId, c.env.NAMESPACE);
+
+        if (!webhookStatusResult.success) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            `❌ *Webhook Status Check Failed*\n\n` +
+              `Unable to check webhook status for job: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\`\n\n` +
+              `Error: ${webhookStatusResult.error?.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\n\n` +
+              `This might be due to:\n` +
+              `• KV storage not configured\n` +
+              `• Temporary service issue\n\n` +
+              `💡 *Try:*\n` +
+              `• Check job status: /status ${jobId}\n` +
+              `Please try again in a few minutes\\.`,
+          );
+        } else {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            webhookStatusResult.formattedMessage?.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&") ||
+            "📡 *Webhook Status*\n\nNo status information available.",
+          );
+        }
+      } catch (error) {
+        logger.error("[Webhook] Error checking webhook status", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          `❌ *Webhook Status Check Failed*\n\n` +
+            `Unable to check webhook status for job: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\`\n\n` +
+            `This might be due to:\n` +
+            `• Temporary service issue\n` +
+            `• Network connectivity problem\n\n` +
+            `💡 *Try:*\n` +
+            `• Check job status: /status ${jobId}\n` +
+            `Please try again in a few minutes\\.`,
+        );
+      }
+
+      return new Response("OK", { status: 200 });
+    } else if (update.message?.text?.startsWith("/retry_webhook")) {
+      logger.info("[Webhook] Retry webhook command received");
+
+      const commandParts = update.message.text.split(" ");
+      const jobId = commandParts[1];
+      const args = commandParts.slice(2);
+
+      if (!jobId) {
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "🔄 *Manual Webhook Retry*\n\n" +
+            "Please provide a job ID:\n" +
+            "`/retry_webhook <job_id>`\n\n" +
+            "Optional: Add 'reset' to clear retry counters:\n" +
+            "`/retry_webhook <job_id> reset`\n\n" +
+            "Example: `/retry_webhook abc12345`"
+        );
+        return new Response("OK", { status: 200 });
+      }
+
+      try {
+        if (!c.env.NAMESPACE) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Configuration Error*\n\n" +
+              "KV storage is not properly configured\\.\n\n" +
+              "Please contact the bot administrator to resolve this issue\\."
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const result = await handleRetryWebhookCommand(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          jobId,
+          c.env.VIDEO_ANALYSIS_SERVICE_URL,
+          c.env.NAMESPACE,
+          args
+        );
+
+        if (result.shouldReply && result.message) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            result.message
+          );
+        }
+      } catch (error) {
+        logger.error("[Webhook] Error handling retry webhook command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          `❌ *Webhook Retry Failed*\n\n` +
+            `Unable to retry webhook for job: \`${jobId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\`\n\n` +
+            `This might be due to:\n` +
+            `• Temporary service issue\n` +
+            `• Network connectivity problem\n\n` +
+            `💡 *Try:*\n` +
+            `• Check webhook status: /webhook_status ${jobId}\n` +
+            `Please try again in a few minutes\\.`
+        );
+      }
+
+      return new Response("OK", { status: 200 });
+    } else if (update.message?.text?.startsWith("/dead_letter_queue")) {
+      logger.info("[Webhook] Dead letter queue command received");
+
+      const commandParts = update.message.text.split(" ");
+      const page = commandParts[1] ? parseInt(commandParts[1]) : 1;
+
+      try {
+        if (!c.env.NAMESPACE) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Configuration Error*\n\n" +
+              "KV storage is not properly configured\\.\n\n" +
+              "Please contact the bot administrator to resolve this issue\\."
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const result = await handleDeadLetterQueueCommand(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          c.env.NAMESPACE,
+          page
+        );
+
+        if (result.shouldReply && result.message) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            result.message
+          );
+        }
+      } catch (error) {
+        logger.error("[Webhook] Error handling dead letter queue command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          `❌ *Dead Letter Queue Check Failed*\n\n` +
+            `Unable to retrieve dead letter queue information\\.\n\n` +
+            `This might be due to:\n` +
+            `• Temporary service issue\n` +
+            `• KV storage not configured\n\n` +
+            `💡 *Try:*\n` +
+            `Please try again in a few minutes\\.`
+        );
+      }
+
+      return new Response("OK", { status: 200 });
+    } else if (update.message?.text?.startsWith("/retry_dead_letter")) {
+      logger.info("[Webhook] Retry dead letter command received");
+
+      const commandParts = update.message.text.split(" ");
+      const entryId = commandParts[1];
+
+      if (!entryId) {
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "🔄 *Retry Dead Letter Entry*\n\n" +
+            "Please provide an entry ID:\n" +
+            "`/retry_dead_letter <entry_id>`\n\n" +
+            "💡 *To find entry IDs:*\n" +
+            "• View dead letter queue: /dead_letter_queue\n\n" +
+            "Example: `/retry_dead_letter dead_12345`"
+        );
+        return new Response("OK", { status: 200 });
+      }
+
+      try {
+        if (!c.env.NAMESPACE) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Configuration Error*\n\n" +
+              "KV storage is not properly configured\\.\n\n" +
+              "Please contact the bot administrator to resolve this issue\\."
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const result = await handleRetryDeadLetterCommand(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          entryId,
+          c.env.VIDEO_ANALYSIS_SERVICE_URL,
+          c.env.NAMESPACE
+        );
+
+        if (result.shouldReply && result.message) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            result.message
+          );
+        }
+      } catch (error) {
+        logger.error("[Webhook] Error handling retry dead letter command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          `❌ *Dead Letter Retry Failed*\n\n` +
+            `Unable to retry dead letter entry: \`${entryId.replace(/[_*\[\]()~`>#+=|{}.!-]/g, "\\$&")}\`\n\n` +
+            `This might be due to:\n` +
+            `• Temporary service issue\n` +
+            `• Network connectivity problem\n\n` +
+            `💡 *Try:*\n` +
+            `• Check dead letter queue: /dead_letter_queue\n` +
+            `Please try again in a few minutes\\.`
+        );
+      }
+
+      return new Response("OK", { status: 200 });
+    } else if (update.message?.text?.startsWith("/clear_dead_letter")) {
+      logger.info("[Webhook] Clear dead letter command received");
+
+      const commandParts = update.message.text.split(" ");
+      const args = commandParts.slice(1);
+
+      try {
+        if (!c.env.NAMESPACE) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Configuration Error*\n\n" +
+              "KV storage is not properly configured\\.\n\n" +
+              "Please contact the bot administrator to resolve this issue\\."
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const result = await handleClearDeadLetterCommand(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          c.env.NAMESPACE,
+          args
+        );
+
+        if (result.shouldReply && result.message) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            result.message
+          );
+        }
+      } catch (error) {
+        logger.error("[Webhook] Error handling clear dead letter command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          `❌ *Clear Dead Letter Queue Failed*\n\n` +
+            `Unable to clear dead letter queue\\.\n\n` +
+            `This might be due to:\n` +
+            `• Temporary service issue\n` +
+            `• KV storage not configured\n\n` +
+            `💡 *Try:*\n` +
+            `Please try again in a few minutes\\.`
         );
       }
 
       return new Response("OK", { status: 200 });
     } else if (update.message?.text === "/recipe") {
-      console.log("[Webhook] Recipe command received, waiting for video");
+      logger.info("[Webhook] Recipe command received, waiting for video");
 
       await sendMarkdownV2Text(
         c.env.ENV_BOT_TOKEN,
@@ -897,8 +1256,8 @@ app.post(WEBHOOK, async (c) => {
           "• Step\\-by\\-step instructions\n" +
           "• Cooking times and temperatures\n" +
           "• Tips and techniques\n\n" +
-                  "⚠️ *Important:* Maximum video size: 10MB\n" +
-        "_Processing is done asynchronously - you'll get a job ID to track progress_",
+          "⚠️ *Important:* Video size will be validated by the analyzer service\n" +
+          "_Processing is done asynchronously - you'll get a job ID to track progress_",
       );
 
       return new Response("OK", { status: 200 });
@@ -906,7 +1265,7 @@ app.post(WEBHOOK, async (c) => {
       update.message?.video ||
       update.message?.document?.mime_type?.startsWith("video/")
     ) {
-      console.log("[Webhook] Video received for async analysis");
+      logger.info("[Webhook] Video received for async analysis");
 
       try {
         // Create webhook URL for job completion notifications
@@ -922,15 +1281,14 @@ app.post(WEBHOOK, async (c) => {
         );
 
         if (!response.ok) {
-          console.error(
-            "[Webhook] Video analysis failed:",
-            response.description,
-          );
+          logger.error("[Webhook] Video analysis failed", {
+            description: response.description,
+          });
         }
 
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error("[Webhook] Error in video analysis:", error);
+        logger.error("[Webhook] Error in video analysis", { error });
         return new Response("OK", { status: 200 });
       }
     } else if (update.message?.text === "/ping") {
@@ -942,7 +1300,7 @@ app.post(WEBHOOK, async (c) => {
         );
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error("[Webhook] Error sending ping response:", error);
+        logger.error("[Webhook] Error sending ping response", { error });
         if (
           error instanceof Error &&
           (error.message === "Network error" ||
@@ -954,7 +1312,7 @@ app.post(WEBHOOK, async (c) => {
         return new Response("Internal Server Error", { status: 500 });
       }
     } else if (update.message?.text === "/usage") {
-      console.log("[Webhook] Usage command received");
+      logger.info("[Webhook] Usage command received");
       try {
         const usageInfo = await getGeminiUsageInfo(c.env.NAMESPACE);
         await sendMarkdownV2Text(
@@ -964,7 +1322,7 @@ app.post(WEBHOOK, async (c) => {
         );
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error("[Webhook] Error sending usage response:", error);
+        logger.error("[Webhook] Error sending usage response", { error });
         try {
           await sendMarkdownV2Text(
             c.env.ENV_BOT_TOKEN,
@@ -972,7 +1330,9 @@ app.post(WEBHOOK, async (c) => {
             "❌ *Usage Check Failed*\n\nUnable to retrieve usage statistics\\. Please try again later\\.",
           );
         } catch (fallbackError) {
-          console.error("[Webhook] Fallback usage response failed:", fallbackError);
+          logger.error("[Webhook] Fallback usage response failed", {
+            error: fallbackError,
+          });
         }
         return new Response("OK", { status: 200 });
       }
@@ -988,7 +1348,7 @@ app.post(WEBHOOK, async (c) => {
         );
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error("[Webhook] Error sending help/start response:", error);
+        logger.error("[Webhook] Error sending help/start response", { error });
         if (
           error instanceof Error &&
           (error.message === "Network error" || error.name === "NetworkError")
@@ -1010,10 +1370,9 @@ app.post(WEBHOOK, async (c) => {
             getHelpMessage(),
           );
         } catch (error) {
-          console.error(
-            "[Webhook] Error sending group welcome message:",
+          logger.error("[Webhook] Error sending group welcome message", {
             error,
-          );
+          });
           if (
             error instanceof Error &&
             (error.message === "Network error" || error.name === "NetworkError")
@@ -1033,10 +1392,9 @@ app.post(WEBHOOK, async (c) => {
         );
         return new Response("OK", { status: 200 });
       } catch (error) {
-        console.error(
-          "[Webhook] Error sending unknown command response:",
+        logger.error("[Webhook] Error sending unknown command response", {
           error,
-        );
+        });
         if (
           error instanceof Error &&
           (error.message === "Network error" || error.name === "NetworkError")
@@ -1049,7 +1407,7 @@ app.post(WEBHOOK, async (c) => {
 
     return new Response("OK", { status: 200 });
   } catch (error) {
-    console.error("[Webhook] Error:", error);
+    logger.error("[Webhook] Error", { error });
     if (
       error instanceof Error &&
       (error.message === "Network error" || error.name === "NetworkError")
@@ -1065,10 +1423,9 @@ app.get("/registerWebhook", async (c: Context<{ Bindings: Env }>) => {
   const host = c.req.header("host") || "";
   const webhookUrl = `https://${host}${WEBHOOK}`;
 
-  console.log(
-    "[Register Webhook] Attempting to register webhook URL:",
+  logger.info("[Register Webhook] Attempting to register webhook URL", {
     webhookUrl,
-  );
+  });
 
   const r: TelegramResponse = await (
     await fetch(
@@ -1087,9 +1444,11 @@ app.get("/registerWebhook", async (c: Context<{ Bindings: Env }>) => {
   ).json();
 
   if (r.ok) {
-    console.log("[Register Webhook] Successfully registered webhook");
+    logger.info("[Register Webhook] Successfully registered webhook");
   } else {
-    console.error("[Register Webhook] Failed to register webhook:", r);
+    logger.error("[Register Webhook] Failed to register webhook", {
+      response: r,
+    });
   }
 
   return c.text(r.ok ? "Ok" : JSON.stringify(r, null, 2));
@@ -1097,16 +1456,18 @@ app.get("/registerWebhook", async (c: Context<{ Bindings: Env }>) => {
 
 // Unregister webhook
 app.get("/unRegisterWebhook", async (c: Context<{ Bindings: Env }>) => {
-  console.log("[Unregister Webhook] Attempting to remove webhook");
+  logger.info("[Unregister Webhook] Attempting to remove webhook");
 
   const r: TelegramResponse = await (
     await fetch(apiUrl(c.env.ENV_BOT_TOKEN, "setWebhook", { url: "" }))
   ).json();
 
   if (r.ok) {
-    console.log("[Unregister Webhook] Successfully removed webhook");
+    logger.info("[Unregister Webhook] Successfully removed webhook");
   } else {
-    console.error("[Unregister Webhook] Failed to remove webhook:", r);
+    logger.error("[Unregister Webhook] Failed to remove webhook", {
+      response: r,
+    });
   }
 
   return c.text(r.ok ? "Ok" : JSON.stringify(r, null, 2));

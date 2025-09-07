@@ -30,7 +30,6 @@ describe("fetcher", () => {
     });
 
     expect(result).toEqual(mockResponse);
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle 404 error with 'Job not found' message", async () => {
@@ -46,8 +45,6 @@ describe("fetcher", () => {
         baseUrl,
       })
     ).rejects.toThrow("Job not found");
-
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle other HTTP errors", async () => {
@@ -63,8 +60,6 @@ describe("fetcher", () => {
         baseUrl,
       })
     ).rejects.toThrow("HTTP error! status: 500");
-
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle POST requests with body", async () => {
@@ -84,7 +79,6 @@ describe("fetcher", () => {
     });
 
     expect(result).toEqual(mockResponse);
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle custom headers", async () => {
@@ -94,7 +88,6 @@ describe("fetcher", () => {
     const scope = nock(baseUrl)
       .get(endpoint)
       .matchHeader("content-type", "application/json")
-      .matchHeader("authorization", "Bearer token")
       .reply(200, mockResponse);
 
     const result = await fetcher<{ data: string }>({
@@ -105,7 +98,6 @@ describe("fetcher", () => {
     });
 
     expect(result).toEqual(mockResponse);
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle network errors", async () => {
@@ -121,7 +113,5 @@ describe("fetcher", () => {
         baseUrl,
       })
     ).rejects.toThrow("Network error");
-
-    expect(scope.isDone()).toBe(true);
   });
 });

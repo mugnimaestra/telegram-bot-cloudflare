@@ -16,6 +16,17 @@ export interface VideoAnalysisResponse {
   success: boolean;
   recipe?: CookingRecipe;
   error?: string;
+  error_type?:
+    | "size_context_limit"
+    | "processing_error"
+    | "network_error"
+    | "unknown_error";
+  error_details?: {
+    max_size_mb?: number;
+    max_duration_seconds?: number;
+    max_frames?: number;
+    suggested_actions?: string[];
+  };
 }
 
 /**
@@ -41,14 +52,29 @@ export async function callVideoAnalysisService(
     };
 
     // Make the API call with retry logic
-    const response = await fetchWithRetry(`${serviceUrl}/analyze`, {
-      method: 'POST',
+    logger.debug("callVideoAnalysisService calling fetchWithRetry", {
+      url: `${serviceUrl}/analyze`,
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'TelegramBot/1.0',
+        "Content-Type": "application/json",
+        "User-Agent": "TelegramBot/1.0",
       },
-      body: JSON.stringify(payload),
-    }, 3, 120000); // 2 minutes for video analysis
+      body: payload,
+    });
+
+    const response = await fetchWithRetry(
+      `${serviceUrl}/analyze`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "TelegramBot/1.0",
+        },
+        body: JSON.stringify(payload),
+      },
+      3,
+      120000,
+    ); // 2 minutes for video analysis
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -57,10 +83,12 @@ export async function callVideoAnalysisService(
           error: "Job not found",
         };
       }
-      throw new Error(`Service returned ${response.status}: ${response.statusText}`);
+      throw new Error(
+        `Service returned ${response.status}: ${response.statusText}`,
+      );
     }
 
-    const result = await response.json() as VideoAnalysisResponse;
+    const result = (await response.json()) as VideoAnalysisResponse;
 
     logger.info("Video analysis service response received", {
       success: result.success,
@@ -95,7 +123,6 @@ export async function callVideoAnalysisService(
         error: result.error || "Service failed to analyze video",
       };
     }
-
   } catch (error) {
     logger.error("Failed to call video analysis service", {
       error: error instanceof Error ? error.message : String(error),
@@ -105,8 +132,8 @@ export async function callVideoAnalysisService(
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Service communication failed",
+      error:
+        error instanceof Error ? error.message : "Service communication failed",
     };
   }
 }
-

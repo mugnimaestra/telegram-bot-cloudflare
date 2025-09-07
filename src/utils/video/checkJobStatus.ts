@@ -3,12 +3,15 @@
  */
 
 import type { VideoAnalysisJobStatus } from "@/types/videoJob";
+import type { WebhookDeliveryStatus } from "./webhookDeliveryStatus";
+import { getWebhookDeliveryStatus, formatWebhookDeliveryStatus } from "./webhookDeliveryStatus";
 import { logger } from "@/utils/logger";
 
 export async function checkJobStatus(
   serviceUrl: string,
   jobId: string,
-): Promise<{ success: boolean; job?: VideoAnalysisJobStatus; error?: string }> {
+  kvNamespace?: KVNamespace,
+): Promise<{ success: boolean; job?: VideoAnalysisJobStatus; webhookStatus?: WebhookDeliveryStatus; error?: string }> {
   try {
     logger.info("Checking job status", { serviceUrl, jobId });
 
@@ -37,7 +40,31 @@ export async function checkJobStatus(
       progress: jobStatus.progress,
     });
 
-    return { success: true, job: jobStatus };
+    // Try to get webhook delivery status if KV namespace is provided
+    let webhookStatus: WebhookDeliveryStatus | undefined;
+    if (kvNamespace) {
+      try {
+        const retrievedStatus = await getWebhookDeliveryStatus(jobId, kvNamespace);
+        if (retrievedStatus) {
+          webhookStatus = retrievedStatus;
+        }
+        if (webhookStatus) {
+          logger.debug("Retrieved webhook delivery status", {
+            jobId,
+            webhookStatus: webhookStatus.status,
+            attempts: webhookStatus.attempts
+          });
+        }
+      } catch (error) {
+        logger.warn("Failed to retrieve webhook delivery status", {
+          jobId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Don't fail the entire status check if webhook status retrieval fails
+      }
+    }
+
+    return { success: true, job: jobStatus, webhookStatus };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -52,7 +79,10 @@ export async function checkJobStatus(
   }
 }
 
-export function formatJobStatusMessage(job: VideoAnalysisJobStatus): string {
+export function formatJobStatusMessage(
+  job: VideoAnalysisJobStatus,
+  webhookStatus?: WebhookDeliveryStatus
+): string {
   const statusEmoji = {
     processing: '🔄',
     completed: '✅',
@@ -68,6 +98,43 @@ export function formatJobStatusMessage(job: VideoAnalysisJobStatus): string {
                 `Progress: ${job.progress}%\n` +
                 `Created: ${createdAt.toLocaleString()}\n` +
                 `Updated: ${updatedAt.toLocaleString()}\n`;
+
+  // Add webhook delivery status if available
+  if (webhookStatus) {
+    message += `\n📡 *Webhook Delivery*\n`;
+    message += `Status: ${webhookStatus.status}\n`;
+    message += `Attempts: ${webhookStatus.attempts}/${webhookStatus.maxAttempts}\n`;
+    
+    if (webhookStatus.timestamps.lastAttempt) {
+      const lastAttempt = new Date(webhookStatus.timestamps.lastAttempt);
+      message += `Last Attempt: ${lastAttempt.toLocaleString()}\n`;
+    }
+    
+    if (webhookStatus.status === 'retrying' && webhookStatus.timestamps.nextRetry) {
+      const nextRetry = new Date(webhookStatus.timestamps.nextRetry);
+      message += `Next Retry: ${nextRetry.toLocaleString()}\n`;
+    }
+    
+    if (webhookStatus.status === 'delivered' && webhookStatus.timestamps.delivered) {
+      const delivered = new Date(webhookStatus.timestamps.delivered);
+      message += `Delivered: ${delivered.toLocaleString()}\n`;
+    }
+    
+    if (webhookStatus.error) {
+      message += `Error: ${webhookStatus.error.message}\n`;
+    }
+    
+    // Add action buttons if webhook failed but can be retried
+    if (webhookStatus.status === 'failed' && webhookStatus.attempts < webhookStatus.maxAttempts) {
+      message += `\n💡 *Actions:*\n`;
+      message += `• Retry webhook: /retry_webhook ${job.id}\n`;
+    }
+    
+    if (webhookStatus.status === 'dead_letter') {
+      message += `\n💀 *Webhook delivery permanently failed*\n`;
+      message += `• Contact support for assistance\n`;
+    }
+  }
 
   if (job.status === 'processing') {
     const timeElapsed = Math.floor((Date.now() - createdAt.getTime()) / 1000);
@@ -94,9 +161,42 @@ export function formatJobStatusMessage(job: VideoAnalysisJobStatus): string {
     message += `📝 ${job.result.recipe.ingredients?.length || 0} ingredients, ${job.result.recipe.instructions?.length || 0} steps\n`;
   }
 
-  if (job.status === 'failed' && job.error) {
-    message += `\n❌ Error: ${job.error}\n`;
+  if (job.status === 'failed') {
+    if (job.error_type === 'size_context_limit') {
+      message += `\n❌ Size/Context Limitation Detected\n`;
+      message += `Error: ${job.error || 'Video exceeds processing limits'}\n`;
+      
+      if (job.error_details?.max_size_mb) {
+        message += `• Maximum file size: ${job.error_details.max_size_mb}MB\n`;
+      }
+      if (job.error_details?.max_duration_seconds) {
+        message += `• Maximum duration: ${job.error_details.max_duration_seconds} seconds\n`;
+      }
+      if (job.error_details?.max_frames) {
+        message += `• Maximum frames: ${job.error_details.max_frames}\n`;
+      }
+      
+      message += `\n💡 Suggestions:\n`;
+      if (job.error_details?.suggested_actions && job.error_details.suggested_actions.length > 0) {
+        job.error_details.suggested_actions.forEach(action => {
+          message += `• ${action}\n`;
+        });
+      } else {
+        message += `• Use a shorter video (under 2 minutes)\n`;
+        message += `• Reduce video resolution\n`;
+        message += `• Focus on key cooking steps only\n`;
+      }
+    } else if (job.error) {
+      message += `\n❌ Error: ${job.error}\n`;
+    }
   }
 
   return message;
+}
+
+/**
+ * Format webhook delivery status for standalone display
+ */
+export function formatWebhookOnlyStatusMessage(webhookStatus: WebhookDeliveryStatus): string {
+  return formatWebhookDeliveryStatus(webhookStatus);
 }

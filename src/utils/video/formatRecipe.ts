@@ -3,7 +3,7 @@
  */
 
 import type { CookingRecipe } from "@/types/video";
-import { escapeMarkdown } from "@/utils/telegram/escapeMarkdown";
+import { escapeRegularText, bold, italic } from "@/utils/telegram/escapeMarkdown";
 import { logger } from "@/utils/logger";
 
 /** Maximum characters per Telegram message (with some buffer for formatting) */
@@ -20,66 +20,74 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
   }
 
   try {
-    let message = `🍳 *${escapeMarkdown(recipe.title || "Recipe from Video")}*\n\n`;
+    let message = `🍳 ${bold(recipe.title || "Recipe from Video")}\n\n`;
 
-    // Basic info section with enhanced emojis
-    const infoItems = [];
-    if (recipe.servings) infoItems.push(`👥 *Serves:* ${recipe.servings}`);
-    if (recipe.prepTime)
-      infoItems.push(`⏱️ *Prep:* ${escapeMarkdown(recipe.prepTime)}`);
-    if (recipe.cookTime)
-      infoItems.push(`🔥 *Cook:* ${escapeMarkdown(recipe.cookTime)}`);
-    if (recipe.totalTime)
-      infoItems.push(`⏰ *Total:* ${escapeMarkdown(recipe.totalTime)}`);
-    if (recipe.difficulty)
-      infoItems.push(`📊 *Difficulty:* ${escapeMarkdown(recipe.difficulty)}`);
+    // Basic info section
+    const infoItems: string[] = [];
+    if (recipe.servings) {
+      infoItems.push(`👥 ${escapeRegularText(String(recipe.servings))} servings`);
+    }
+    if (recipe.prepTime) {
+      infoItems.push(`⏱️ ${bold("Prep:")} ${escapeRegularText(recipe.prepTime)}`);
+    }
+    if (recipe.cookTime) {
+      infoItems.push(`🔥 ${bold("Cook:")} ${escapeRegularText(recipe.cookTime)}`);
+    }
+    if (recipe.totalTime) {
+      infoItems.push(`⏰ ${bold("Total:")} ${escapeRegularText(recipe.totalTime)}`);
+    }
+    if (recipe.difficulty) {
+      infoItems.push(`📊 ${bold("Difficulty:")} ${escapeRegularText(recipe.difficulty)}`);
+    }
 
     if (infoItems.length > 0) {
-      message += infoItems.join(" \\| ") + "\n\n";
+      message += infoItems.join("\n") + "\n";
     }
 
     // Ingredients
     if (recipe.ingredients && recipe.ingredients.length > 0) {
-      message += `🛒 *Shopping List:*\n`;
-      recipe.ingredients.forEach((ing, index) => {
-        // Safety check for undefined ingredient object
-        if (!ing) {
-          logger.warn(`Undefined ingredient at index ${index}, skipping`);
-          return;
-        }
-        
-        // Only add ingredients that have meaningful content
-        if (!ing.item && !ing.amount && !ing.name) return;
+      message += `\n📝 ${bold("Ingredients:")}\n`;
+      message += recipe.ingredients
+        .map((ing, index) => {
+          if (!ing) {
+            logger.warn(`Undefined ingredient at index ${index}, skipping`);
+            return "";
+          }
+          
+          // Only add ingredients that have meaningful content
+          if (!ing.item && !ing.amount && !ing.name) return "";
 
-        const item = escapeMarkdown(ing.item || ing.name || "");
-        const amount = ing.amount ? `${escapeMarkdown(ing.amount)} ` : "";
-        const unit = ing.unit ? `${escapeMarkdown(ing.unit)} ` : "";
-        const prep = ing.preparation || ing.notes
-          ? ` (${escapeMarkdown(ing.preparation || ing.notes || "")})`
-          : "";
-        const optional = ing.optional ? " *(optional)*" : "";
-        
-        message += `• ${amount}${unit}${item}${prep}${optional}\n`;
-      });
+          const item = escapeRegularText(ing.item || ing.name || "");
+          const amount = ing.amount ? `${escapeRegularText(ing.amount)} ` : "";
+          const unit = ing.unit ? `${escapeRegularText(ing.unit)} ` : "";
+          const prep = ing.preparation || ing.notes
+            ? ` \(${escapeRegularText(ing.preparation || ing.notes || "")}\)`
+            : "";
+          const optional = ing.optional ? ` ${italic("optional")}` : "";
+          
+          return `• ${amount}${unit}${item}${prep}${optional}`;
+        })
+        .filter(Boolean)
+        .join("\n") + "\n";
     }
 
     // Equipment
     if (recipe.equipment && recipe.equipment.length > 0) {
-      message += `\n🔧 *Equipment:*\n`;
+      message += `\n🔧 ${bold("Equipment:")}\n`;
       message +=
         recipe.equipment.map((item, index) => {
           if (!item) {
             logger.warn(`Undefined equipment item at index ${index}, skipping`);
             return "";
           }
-          return `• ${escapeMarkdown(item)}`;
+          return `• ${escapeRegularText(item)}`;
         }).filter(Boolean).join("\n") +
         "\n";
     }
 
     // Instructions
     if (recipe.instructions && recipe.instructions.length > 0) {
-      message += `\n👩‍🍳 *Cooking Instructions:*\n`;
+      message += `\n📖 ${bold("Instructions:")}\n`;
       recipe.instructions.forEach((inst, index) => {
         // Safety check for undefined instruction object
         if (!inst) {
@@ -88,42 +96,42 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
         }
 
         const stepNum = inst.step || inst.step_number || index + 1;
-        const description = escapeMarkdown(inst.description || inst.action || "");
+        const description = escapeRegularText(inst.description || inst.action || "");
         const duration = inst.duration || inst.time
-          ? ` ⏱️ ${escapeMarkdown(inst.duration || inst.time || "")}`
+          ? ` \\[${escapeRegularText(inst.duration || inst.time || "")}\\]`
           : "";
         const temperature = inst.temperature
-          ? ` 🌡️ ${escapeMarkdown(inst.temperature)}`
+          ? ` 🌡️ ${escapeRegularText(inst.temperature)}`
           : "";
         
-        message += `\n*Step ${stepNum}*${duration}${temperature}\n`;
+        message += `\n${bold(`Step ${stepNum}`)}${duration}\n`;
         message += `${description}\n`;
         
         if (inst.tips) {
-          message += `💡 _${escapeMarkdown(inst.tips)}_\n`;
+          message += `💡 ${italic(inst.tips)}\n`;
         }
         
         if (inst.visual_cues) {
-          message += `👁️ _${escapeMarkdown(inst.visual_cues)}_\n`;
+          message += `👁️ ${italic(inst.visual_cues)}\n`;
         }
       });
     }
 
     // Techniques
     if (recipe.techniques && recipe.techniques.length > 0) {
-      message += `\n🎯 *Techniques Used:*\n`;
+      message += `\n🎯 ${bold("Techniques Used:")}\n`;
       message +=
         recipe.techniques
-          .map((tech) => `• ${escapeMarkdown(tech || "")}`)
+          .map((tech) => `• ${escapeRegularText(tech || "")}`)
           .join("\n") + "\n";
     }
 
     // Tips
     if (recipe.tips && recipe.tips.length > 0) {
-      message += `\n💡 *Tips & Tricks:*\n`;
+      message += `\n💡 ${bold("Tips & Tricks:")}\n`;
       recipe.tips.forEach((tip, index) => {
         if (tip) {
-          message += `• ${escapeMarkdown(tip)}\n`;
+          message += `• ${escapeRegularText(tip)}\n`;
         } else {
           logger.warn(`Undefined tip at index ${index}, skipping`);
         }
@@ -132,11 +140,11 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
 
     // Notes
     if (recipe.notes) {
-      message += `\n📌 *Notes:* ${escapeMarkdown(recipe.notes)}\n\n`;
+      message += `\n📌 ${bold("Notes:")} ${escapeRegularText(recipe.notes)}\n\n`;
     }
 
     // Footer
-    message += `_Recipe extracted from video using AI analysis_`;
+    message += `${italic("Recipe extracted from video using AI analysis")}`;
 
     logger.debug("Recipe message formatted successfully", {
       messageLength: message.length,
@@ -145,6 +153,7 @@ export function formatRecipeMessage(recipe: CookingRecipe): string {
   } catch (error) {
     logger.error("Recipe message formatting failed", {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
     return `❌ Unable to format recipe: Formatting error occurred`;
   }

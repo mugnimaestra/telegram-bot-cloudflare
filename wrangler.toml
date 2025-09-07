@@ -9,7 +9,7 @@ CF_ACCOUNT_ID = "1244cf2ef2ea1cf95b7b95dc8188222c"
 R2_BUCKET_NAME = "nhapiod-proxy"
 R2_PUBLIC_URL = "https://pub-0a13ff58e0fb441aafab98f56637c326.r2.dev"
 NH_API_URL = "https://nhapiod-proxy.onrender.com"
-VIDEO_ANALYSIS_SERVICE_URL = "https://cloudflared-api-video.mugnimaestra.dev"
+VIDEO_ANALYSIS_SERVICE_URL = "https://api-video-analyzer.mugnimaestra.dev"
 NODE_ENV = "production"
 
 [observability.logs]

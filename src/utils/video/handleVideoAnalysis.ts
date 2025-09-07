@@ -13,8 +13,7 @@ import { editMessageText } from "@/utils/telegram/fetchers/editMessageText";
 import { logger } from "@/utils/logger";
 import { fetchWithRetry } from "./fetchWithRetry";
 
-// Limits for Cloudflare Workers constraints
-const MAX_VIDEO_SIZE = 10 * 1024 * 1024; // Increased to 10MB for R2 storage (less processing overhead)
+// Video size validation is now handled by the video analyzer service
 
 
 interface TelegramFileInfo {
@@ -96,23 +95,9 @@ export async function handleVideoAnalysis(
     return { ok: false, description: "Please send a cooking video" };
   }
 
-  // Check file size with strict Cloudflare Workers limits
+  // File size validation is now handled by the video analyzer service
   const fileSize = message.video?.file_size || message.document?.file_size || 0;
-  if (fileSize > MAX_VIDEO_SIZE) {
-    await sendMarkdownV2Text(
-      token,
-      chatId,
-      `❌ Video is too large \\(${Math.round(fileSize / 1024 / 1024)}MB\\)\\.\n\n` +
-      `📋 *Cloudflare Workers Limits:*\n` +
-      `• Maximum video size: 3MB\n` +
-      `• Memory constraints prevent larger files\n\n` +
-      `💡 *Try:*\n` +
-      `• Compress your video\n` +
-      `• Use a shorter clip\n` +
-      `• Record at lower resolution`,
-    );
-    return { ok: false, description: "Video too large for Workers environment" };
-  }
+  logger.info("Video file size", { sizeMB: Math.round(fileSize / 1024 / 1024) });
 
   // Send processing message
   processingMsg = await sendMarkdownV2Text(
@@ -165,10 +150,8 @@ export async function handleVideoAnalysis(
     // Download video buffer
     const videoBuffer = await videoResponse.arrayBuffer();
 
-    // Safety check for buffer size
-    if (videoBuffer.byteLength > MAX_VIDEO_SIZE) {
-      throw new Error(`Video file too large: ${Math.round(videoBuffer.byteLength / 1024 / 1024)}MB. Maximum: ${Math.round(MAX_VIDEO_SIZE / 1024 / 1024)}MB`);
-    }
+    // Buffer size validation is now handled by the video analyzer service
+    logger.info("Video buffer size", { sizeMB: Math.round(videoBuffer.byteLength / 1024 / 1024) });
 
     logger.info("Video downloaded successfully", {
       bufferSize: videoBuffer.byteLength,
@@ -237,6 +220,22 @@ export async function handleVideoAnalysis(
       });
 
       if (!analysisResult.success || !analysisResult.recipe) {
+        // Handle different error types with specific user guidance
+        if (analysisResult.error_type === 'size_context_limit') {
+          let errorDetails = '';
+          if (analysisResult.error_details?.max_size_mb) {
+            errorDetails += `\n• Maximum file size: ${analysisResult.error_details.max_size_mb}MB`;
+          }
+          if (analysisResult.error_details?.max_duration_seconds) {
+            errorDetails += `\n• Maximum duration: ${analysisResult.error_details.max_duration_seconds} seconds`;
+          }
+          if (analysisResult.error_details?.max_frames) {
+            errorDetails += `\n• Maximum frames: ${analysisResult.error_details.max_frames}`;
+          }
+
+          throw new Error(`Video is too large or complex for processing${errorDetails}\n\nPlease try:\n• Using a shorter video (under 2 minutes)\n• Reducing video resolution\n• Focusing on key cooking steps only`);
+        }
+        
         throw new Error(analysisResult.error || "Could not extract recipe from the video. Please ensure the video clearly shows cooking steps and ingredients.");
       }
 
@@ -302,7 +301,7 @@ export async function handleVideoAnalysis(
           {
             chat_id: chatId,
             message_id: processingMsg.result.message_id,
-            text: `❌ Failed to analyze video\n\nError: ${errorMessage}\n\nPlease try:\n• Sending a shorter video\n• Ensuring the video shows cooking clearly\n• Using a video under ${Math.round(MAX_VIDEO_SIZE / 1024 / 1024)}MB`,
+            text: `❌ Failed to analyze video\n\nError: ${errorMessage}\n\nPlease try:\n• Sending a clearer video\n• Ensuring the video shows cooking steps\n• The video analyzer service will determine if your video can be processed`,
           },
           token,
         );

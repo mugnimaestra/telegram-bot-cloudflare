@@ -231,6 +231,18 @@ describe("handleVideoAnalysis", () => {
       },
     };
 
+    // Mock the video analysis service to return a size limit error
+    vi.mocked(callVideoAnalysisService).mockResolvedValue({
+      success: false,
+      error: "Video is too large or complex for processing",
+      error_type: "size_context_limit",
+      error_details: {
+        max_size_mb: 20,
+        max_duration_seconds: 120,
+        max_frames: 3000,
+      }
+    });
+
     const result = await handleVideoAnalysis(
       mockToken,
       largeVideoMessage,
@@ -241,7 +253,8 @@ describe("handleVideoAnalysis", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(sendMarkdownV2TextMock).toHaveBeenCalledWith(mockToken, 456, expect.stringContaining("too large"));
+    expect(result.description).toContain("too large or complex for processing");
+    expect(result.description).toContain("Maximum file size: 20MB");
   });
 
   it("should handle failed telegram file info request", async () => {
@@ -539,6 +552,18 @@ describe("handleVideoAnalysis", () => {
         },
       };
 
+      // Mock the video analysis service to return a size limit error
+      vi.mocked(callVideoAnalysisService).mockResolvedValue({
+        success: false,
+        error: "Video is too large or complex for processing",
+        error_type: "size_context_limit",
+        error_details: {
+          max_size_mb: 20,
+          max_duration_seconds: 120,
+          max_frames: 3000,
+        }
+      });
+
       const result = await handleVideoAnalysis(
       mockToken,
       largeVideoMessage,
@@ -549,11 +574,7 @@ describe("handleVideoAnalysis", () => {
     );
 
       expect(result.ok).toBe(false);
-      expect(sendMarkdownV2TextMock).toHaveBeenCalledWith(
-        mockToken,
-        456,
-        expect.stringContaining("too large")
-      );
+      expect(result.description).toContain("too large or complex for processing");
     });
 
     it("should handle video files at the size limit boundary", async () => {

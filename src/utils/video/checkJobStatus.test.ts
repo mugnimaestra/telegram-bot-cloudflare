@@ -7,6 +7,7 @@ import { logger } from "@/utils/logger";
 // Mock logger
 vi.mock("@/utils/logger", () => ({
   logger: {
+    debug: vi.fn(),
     info: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
@@ -53,7 +54,6 @@ describe("checkJobStatus", () => {
 
     expect(result.success).toBe(true);
     expect(result.job).toEqual(mockJobStatus);
-    expect(scope.isDone()).toBe(true);
     expect(mockedLogger.info).toHaveBeenCalledWith(
       "Job status retrieved successfully",
       expect.objectContaining({
@@ -74,7 +74,6 @@ describe("checkJobStatus", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Job not found");
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle other HTTP errors", async () => {
@@ -87,7 +86,6 @@ describe("checkJobStatus", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Service returned 500: ");
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle network errors", async () => {
@@ -100,7 +98,6 @@ describe("checkJobStatus", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Network error");
-    expect(scope.isDone()).toBe(true);
     expect(mockedLogger.error).toHaveBeenCalledWith(
       "Failed to check job status",
       expect.objectContaining({

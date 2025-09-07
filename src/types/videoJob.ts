@@ -78,6 +78,13 @@ export interface VideoAnalysisJobStatus {
     };
   };
   error?: string;
+  error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error";
+  error_details?: {
+    max_size_mb?: number;
+    max_duration_seconds?: number;
+    max_frames?: number;
+    suggested_actions?: string[];
+  };
 }
 
 export interface VideoAnalysisWebhookPayload {
@@ -120,6 +127,13 @@ export interface VideoAnalysisWebhookPayload {
     };
   };
   error?: string;
+  error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error";
+  error_details?: {
+    max_size_mb?: number;
+    max_duration_seconds?: number;
+    max_frames?: number;
+    suggested_actions?: string[];
+  };
   callback_data: {
     chat_id: number;
     message_id: number;

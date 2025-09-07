@@ -9,8 +9,7 @@ import { apiUrl } from "@/utils/telegram/apiUrl";
 import { logger } from "@/utils/logger";
 import { fetchWithRetry } from "./fetchWithRetry";
 
-// Video size limit for processing (10MB)
-const MAX_VIDEO_SIZE = 10 * 1024 * 1024;
+// Video size validation is now handled by the video analyzer service
 
 
 interface TelegramFileInfo {
@@ -103,23 +102,9 @@ export async function handleVideoAnalysisAsync(
       return { ok: false, description: "Please send a cooking video" };
     }
 
-    // Check file size
+    // File size validation is now handled by the video analyzer service
     const fileSize = message.video?.file_size || message.document?.file_size || 0;
-    if (fileSize > MAX_VIDEO_SIZE) {
-      await sendMarkdownV2Text(
-        token,
-        chatId,
-        `❌ Video is too large \\(${Math.round(fileSize / 1024 / 1024)}MB\\)\\.\n\n` +
-        `📋 *Processing Limits:*\n` +
-        `• Maximum video size: ${Math.round(MAX_VIDEO_SIZE / 1024 / 1024)}MB\n` +
-        `• Processing time: 30\\-90 seconds\n\n` +
-        `💡 *Try:*\n` +
-        `• Compress your video\n` +
-        `• Use a shorter clip\n` +
-        `• Record at lower resolution`,
-      );
-      return { ok: false, description: "Video too large for processing" };
-    }
+    logger.info("Video file size", { sizeMB: Math.round(fileSize / 1024 / 1024) });
 
     // Send processing message
     processingMsg = await sendMarkdownV2Text(
@@ -214,6 +199,28 @@ export async function handleVideoAnalysisAsync(
 
     if (!jobResponse.ok) {
       const errorText = await jobResponse.text();
+      
+      // Try to parse error as JSON to check for structured error format
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData.error_type === 'size_context_limit') {
+          let errorDetails = '';
+          if (errorData.error_details?.max_size_mb) {
+            errorDetails += `\n• Maximum file size: ${errorData.error_details.max_size_mb}MB`;
+          }
+          if (errorData.error_details?.max_duration_seconds) {
+            errorDetails += `\n• Maximum duration: ${errorData.error_details.max_duration_seconds} seconds`;
+          }
+          if (errorData.error_details?.max_frames) {
+            errorDetails += `\n• Maximum frames: ${errorData.error_details.max_frames}`;
+          }
+          
+          throw new Error(`Video is too large or complex for processing${errorDetails}\n\nPlease try:\n• Using a shorter video (under 2 minutes)\n• Reducing video resolution\n• Focusing on key cooking steps only`);
+        }
+      } catch (parseError) {
+        // If JSON parsing fails, continue with original error handling
+      }
+      
       throw new Error(`Service returned ${jobResponse.status}: ${errorText}`);
     }
 
@@ -293,8 +300,8 @@ export async function handleVideoAnalysisAsync(
                   `Error: ${errorMessage}\n\n` +
                   `Please try:\n` +
                   `• Sending a shorter video\n` +
-                  `• Ensuring the video shows cooking clearly\n` +
-                  `• Using a video under ${Math.round(MAX_VIDEO_SIZE / 1024 / 1024)}MB`,
+                  `• Ensuring the video shows cooking steps\n` +
+                  `• The video analyzer service will determine if your video can be processed`,
           },
           token,
         );

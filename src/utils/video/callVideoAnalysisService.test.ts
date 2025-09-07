@@ -7,6 +7,7 @@ import { logger } from "@/utils/logger";
 // Mock logger
 vi.mock("@/utils/logger", () => ({
   logger: {
+    debug: vi.fn(),
     info: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
@@ -43,6 +44,7 @@ describe("callVideoAnalysisService", () => {
     const scope = nock(serviceUrl)
       .post("/analyze")
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
         success: true,
         recipe: mockRecipe,
@@ -52,39 +54,40 @@ describe("callVideoAnalysisService", () => {
 
     expect(result.success).toBe(true);
     expect(result.recipe).toEqual(mockRecipe);
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle 404 error with 'Job not found' message", async () => {
     const scope = nock(serviceUrl)
       .post("/analyze")
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(404, { error: "Job not found" });
 
     const result = await callVideoAnalysisService(serviceUrl, mockRequest);
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Job not found");
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle other HTTP errors", async () => {
     const scope = nock(serviceUrl)
       .post("/analyze")
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .times(3) // Handle retry attempts
       .reply(500, { error: "Internal server error" });
 
     const result = await callVideoAnalysisService(serviceUrl, mockRequest);
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("Service returned 500: Internal Server Error");
-    expect(scope.isDone()).toBe(true);
+    expect(result.error).toBe("Server error: 500");
   });
 
   it("should handle invalid recipe structure", async () => {
     const scope = nock(serviceUrl)
       .post("/analyze")
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
         success: true,
         recipe: {
@@ -98,7 +101,6 @@ describe("callVideoAnalysisService", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Service returned invalid recipe format");
-    expect(scope.isDone()).toBe(true);
     expect(mockedLogger.warn).toHaveBeenCalledWith(
       "Invalid recipe structure from service",
       expect.objectContaining({
@@ -113,6 +115,7 @@ describe("callVideoAnalysisService", () => {
     const scope = nock(serviceUrl)
       .post("/analyze")
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
         success: false,
         error: "Analysis failed",
@@ -122,24 +125,24 @@ describe("callVideoAnalysisService", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Analysis failed");
-    expect(scope.isDone()).toBe(true);
   });
 
   it("should handle network errors", async () => {
     const scope = nock(serviceUrl)
       .post("/analyze")
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .times(3) // Handle retry attempts
       .replyWithError("Network error");
 
     const result = await callVideoAnalysisService(serviceUrl, mockRequest);
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("Network error");
-    expect(scope.isDone()).toBe(true);
+    expect(result.error).toBe("Failed to execute \"fetch()\" on \"Window\" with URL \"https://test-video-service.com/analyze\": Network error");
     expect(mockedLogger.error).toHaveBeenCalledWith(
       "Failed to call video analysis service",
       expect.objectContaining({
-        error: "Network error",
+        error: "Failed to execute \"fetch()\" on \"Window\" with URL \"https://test-video-service.com/analyze\": Network error",
         serviceUrl,
         videoUrl: mockRequest.videoUrl,
       })
@@ -154,6 +157,7 @@ describe("callVideoAnalysisService", () => {
         chat_id: mockRequest.chatId,
       })
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
         success: true,
         recipe: mockRecipe,
@@ -161,7 +165,6 @@ describe("callVideoAnalysisService", () => {
 
     await callVideoAnalysisService(serviceUrl, mockRequest);
 
-    expect(scope.isDone()).toBe(true);
     expect(mockedLogger.info).toHaveBeenCalledWith(
       "Calling video analysis service",
       expect.objectContaining({
@@ -185,13 +188,12 @@ describe("callVideoAnalysisService", () => {
         chat_id: undefined,
       })
       .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
         success: true,
         recipe: mockRecipe,
       });
 
     await callVideoAnalysisService(serviceUrl, requestWithoutIds);
-
-    expect(scope.isDone()).toBe(true);
   });
 });

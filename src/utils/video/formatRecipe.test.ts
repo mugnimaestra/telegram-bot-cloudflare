@@ -6,9 +6,18 @@ import {
 } from "./formatRecipe";
 import type { CookingRecipe } from "@/types/video";
 
-// Mock the escapeMarkdown function
+// Mock the escapeMarkdown function and helpers
 vi.mock("@/utils/telegram/escapeMarkdown", () => ({
   escapeMarkdown: vi.fn((text) => text), // Return text as-is for testing
+  escapeRegularText: vi.fn((text) => text), // Return text as-is for testing
+  escapeFormattedText: vi.fn((text) => text), // Return text as-is for testing
+  bold: vi.fn((text) => `*${text}*`), // Mock bold formatting
+  italic: vi.fn((text) => `_${text}_`), // Mock italic formatting
+  underline: vi.fn((text) => `__${text}__`), // Mock underline formatting
+  strikethrough: vi.fn((text) => `~${text}~`), // Mock strikethrough formatting
+  spoiler: vi.fn((text) => `||${text}||`), // Mock spoiler formatting
+  code: vi.fn((text) => `\`${text}\``), // Mock inline code formatting
+  link: vi.fn((text, url) => `[${text}](${url})`), // Mock link formatting
 }));
 
 // Mock the logger
@@ -58,7 +67,7 @@ describe("formatRecipeMessage", () => {
     expect(result).toContain("• 1 cup sugar (sifted)");
     expect(result).toContain("🔧 *Equipment:*");
     expect(result).toContain("📖 *Instructions:*");
-    expect(result).toContain("*Step 1* [5 minutes]");
+    expect(result).toContain("*Step 1* \\[5 minutes\\]");
     expect(result).toContain("*Step 2*");
     expect(result).toContain("🎯 *Techniques Used:*");
     expect(result).toContain("💡 *Tips & Tricks:*");
