@@ -67,18 +67,18 @@ export async function handleVideoJobWebhook(
           amount: ing.amount && ing.unit ? `${ing.amount} ${ing.unit}`.trim() : (ing.amount || ""),
           preparation: ing.notes || ing.preparation || "",
         })),
-        equipment: [], // Default empty array as equipment data is not provided by the API
+        equipment: (recipe.equipment || []).map(eq => eq.item || "").filter(Boolean),
         instructions: (recipe.instructions || []).map(inst => ({
           step: inst.step || inst.step_number || 0,
           description: inst.instruction || inst.action || "",
           duration: inst.time || inst.duration || "",
         })),
-        prepTime: recipe.prep_time,
-        cookTime: recipe.cook_time,
-        totalTime: recipe.total_time,
+        prepTime: recipe.prep_time_minutes ? `${recipe.prep_time_minutes} minutes` : undefined,
+        cookTime: recipe.cook_time_minutes ? `${recipe.cook_time_minutes} minutes` : undefined,
+        totalTime: recipe.total_time_minutes ? `${recipe.total_time_minutes} minutes` : undefined,
         servings: recipe.servings,
-        difficulty: recipe.difficulty,
-        notes: recipe.notes,
+        difficulty: recipe.difficulty_level,
+        notes: recipe.notes_and_tips?.join('\n• '),
       });
 
       // Update the original message with the recipe

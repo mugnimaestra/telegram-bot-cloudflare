@@ -17,7 +17,7 @@ export interface VideoAnalysisJobRequest {
   video_url: string;
   bot_token: string;
   callback: {
-    type: 'telegram';
+    type: 'webhook';
     webhook_url: string;
     chat_id: number;
     message_id: number;
@@ -65,16 +65,30 @@ export interface VideoAnalysisJobStatus {
         visual_cues?: string;
         tips?: string;
       }>;
-      prep_time?: string;
-      cook_time?: string;
-      total_time?: string;
-      servings?: number;
-      difficulty?: string;
-      cuisine?: string;
+      prep_time_minutes?: number;
+      cook_time_minutes?: number;
+      total_time_minutes?: number;
+      servings?: string;
+      difficulty_level?: string;
       cuisine_type?: string;
-      tags?: string[];
-      notes?: string;
+      meal_category?: string;
+      dietary_info?: string[];
+      cultural_context?: string;
+      equipment?: Array<{
+        item: string;
+        size_or_type?: string;
+        alternative?: string;
+      }>;
+      techniques?: Array<{
+        name: string;
+        description?: string;
+        purpose?: string;
+      }>;
       notes_and_tips?: string[];
+      serving_suggestions?: string[];
+      variations?: string[];
+      storage_instructions?: string;
+      reheating_instructions?: string;
     };
   };
   error?: string;
@@ -114,16 +128,30 @@ export interface VideoAnalysisWebhookPayload {
         visual_cues?: string;
         tips?: string;
       }>;
-      prep_time?: string;
-      cook_time?: string;
-      total_time?: string;
-      servings?: number;
-      difficulty?: string;
-      cuisine?: string;
+      prep_time_minutes?: number;
+      cook_time_minutes?: number;
+      total_time_minutes?: number;
+      servings?: string;
+      difficulty_level?: string;
       cuisine_type?: string;
-      tags?: string[];
-      notes?: string;
+      meal_category?: string;
+      dietary_info?: string[];
+      cultural_context?: string;
+      equipment?: Array<{
+        item: string;
+        size_or_type?: string;
+        alternative?: string;
+      }>;
+      techniques?: Array<{
+        name: string;
+        description?: string;
+        purpose?: string;
+      }>;
       notes_and_tips?: string[];
+      serving_suggestions?: string[];
+      variations?: string[];
+      storage_instructions?: string;
+      reheating_instructions?: string;
     };
   };
   error?: string;

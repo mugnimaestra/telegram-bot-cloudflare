@@ -54,7 +54,7 @@ export async function callVideoAnalysisService(
       video_url: request.videoUrl,
       bot_token: request.botToken,
       callback: request.callbackUrl ? {
-        type: 'telegram' as const,
+        type: 'webhook' as const,
         webhook_url: request.callbackUrl,
         chat_id: request.chatId || 0,
         message_id: request.messageId || 0,
@@ -97,11 +97,35 @@ export async function callVideoAnalysisService(
           error: "Job not found",
         };
       }
+      if (response.status === 400) {
+        const errorData = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          error: errorData.error || "Invalid request format",
+        };
+      }
       throw new Error(
         `Service returned ${response.status}: ${response.statusText}`,
       );
     }
 
+    // Handle 202 (Job accepted) response for async processing
+    if (response.status === 202) {
+      const result = await response.json();
+      
+      logger.info("Video analysis job accepted for async processing", {
+        jobId: result.job_id,
+        status: result.status,
+        message: result.message,
+      });
+
+      return {
+        success: true,
+        // No recipe yet - it will come via webhook callback
+      };
+    }
+
+    // Handle other successful responses (though 202 is expected for async processing)
     const result = (await response.json()) as VideoAnalysisResponse;
 
     logger.info("Video analysis service response received", {

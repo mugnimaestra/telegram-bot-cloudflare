@@ -40,9 +40,71 @@ describe("callVideoAnalysisService", () => {
     _nock.cleanAll();
   });
 
-  it("should successfully call video analysis service", async () => {
+  it("should handle 202 job acceptance response", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze")
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
+      });
+
+    const result = await callVideoAnalysisService(serviceUrl, mockRequest);
+
+    expect(result.success).toBe(true);
+    expect(result.recipe).toBeUndefined();
+  });
+
+  it("should successfully call video analysis service with callback", async () => {
+    const requestWithCallback: VideoAnalysisRequest = {
+      ...mockRequest,
+      botToken: "test-bot-token",
+      callbackUrl: "https://example.com/webhook",
+      messageId: 789,
+    };
+
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === requestWithCallback.videoUrl &&
+               body.bot_token === requestWithCallback.botToken &&
+               body.callback &&
+               body.callback.type === 'webhook' &&
+               body.callback.webhook_url === requestWithCallback.callbackUrl &&
+               body.callback.chat_id === requestWithCallback.chatId &&
+               body.callback.message_id === requestWithCallback.messageId &&
+               body.metadata &&
+               body.metadata.user_id === requestWithCallback.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
+      });
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithCallback);
+
+    expect(result.success).toBe(true);
+    expect(result.recipe).toBeUndefined();
+  });
+
+  it("should handle synchronous recipe response (fallback)", async () => {
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
@@ -58,7 +120,12 @@ describe("callVideoAnalysisService", () => {
 
   it("should handle 404 error with 'Job not found' message", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze")
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(404, { error: "Job not found" });
@@ -69,9 +136,32 @@ describe("callVideoAnalysisService", () => {
     expect(result.error).toBe("Job not found");
   });
 
+  it("should handle 400 bad request errors", async () => {
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(400, { error: "Invalid request format" });
+
+    const result = await callVideoAnalysisService(serviceUrl, mockRequest);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Invalid request format");
+  });
+
   it("should handle other HTTP errors", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze")
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
       .times(3) // Handle retry attempts
@@ -85,7 +175,12 @@ describe("callVideoAnalysisService", () => {
 
   it("should handle invalid recipe structure", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze")
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
@@ -113,7 +208,12 @@ describe("callVideoAnalysisService", () => {
 
   it("should handle service failure response", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze")
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
       .reply(200, {
@@ -129,7 +229,12 @@ describe("callVideoAnalysisService", () => {
 
   it("should handle network errors", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze")
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
       .times(3) // Handle retry attempts
@@ -151,16 +256,18 @@ describe("callVideoAnalysisService", () => {
 
   it("should send correct request payload", async () => {
     const scope = nock(serviceUrl)
-      .post("/analyze", {
-        video_url: mockRequest.videoUrl,
-        user_id: mockRequest.userId,
-        chat_id: mockRequest.chatId,
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === mockRequest.userId &&
+               typeof body.metadata.timestamp === 'number';
       })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
-      .reply(200, {
-        success: true,
-        recipe: mockRecipe,
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
       });
 
     await callVideoAnalysisService(serviceUrl, mockRequest);
@@ -182,18 +289,22 @@ describe("callVideoAnalysisService", () => {
     };
 
     const scope = nock(serviceUrl)
-      .post("/analyze", {
-        video_url: mockRequest.videoUrl,
-        user_id: undefined,
-        chat_id: undefined,
+      .post("/analyze", (body) => {
+        return body.video_url === mockRequest.videoUrl &&
+               body.metadata &&
+               body.metadata.user_id === undefined &&
+               typeof body.metadata.timestamp === 'number';
       })
       .matchHeader("content-type", "application/json")
       .matchHeader("user-agent", "TelegramBot/1.0")
-      .reply(200, {
-        success: true,
-        recipe: mockRecipe,
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
       });
 
-    await callVideoAnalysisService(serviceUrl, requestWithoutIds);
+    const result = await callVideoAnalysisService(serviceUrl, requestWithoutIds);
+    
+    expect(result.success).toBe(true);
   });
 });
