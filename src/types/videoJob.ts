@@ -105,59 +105,10 @@ export interface VideoAnalysisWebhookPayload {
   job_id: string;
   status: 'completed' | 'failed';
   result?: {
-    // New simplified structure with pre-formatted text
-    recipe_text?: string;
-    recipe_title?: string;
-    recipe_ready?: boolean;
-    // Keep existing recipe structure for backward compatibility
-    recipe?: {
-      title?: string;
-      recipe_title?: string;
-      ingredients: Array<{
-        item?: string;
-        name?: string;
-        amount?: string;
-        unit?: string;
-        preparation?: string;
-        notes?: string;
-        optional?: boolean;
-      }>;
-      instructions: Array<{
-        step?: number;
-        step_number?: number;
-        instruction?: string;
-        action?: string;
-        time?: string;
-        duration?: string;
-        temperature?: string;
-        visual_cues?: string;
-        tips?: string;
-      }>;
-      prep_time_minutes?: number;
-      cook_time_minutes?: number;
-      total_time_minutes?: number;
-      servings?: string;
-      difficulty_level?: string;
-      cuisine_type?: string;
-      meal_category?: string;
-      dietary_info?: string[];
-      cultural_context?: string;
-      equipment?: Array<{
-        item: string;
-        size_or_type?: string;
-        alternative?: string;
-      }>;
-      techniques?: Array<{
-        name: string;
-        description?: string;
-        purpose?: string;
-      }>;
-      notes_and_tips?: string[];
-      serving_suggestions?: string[];
-      variations?: string[];
-      storage_instructions?: string;
-      reheating_instructions?: string;
-    };
+    // Simplified structure with pre-formatted text
+    recipe_text: string;
+    recipe_title: string;
+    recipe_ready: boolean;
   };
   error?: string;
   error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error";

@@ -41,79 +41,29 @@ export async function handleVideoJobWebhook(
     const { chat_id, message_id, bot_token } = callback_data;
 
     if (status === 'completed' && result) {
-      // Check if we have the new pre-formatted recipe text
-      if (result.recipe_text && result.recipe_ready) {
-        // Use pre-formatted text directly - no complex parsing needed
-        logger.info("Using pre-formatted recipe text from backend", {
-          jobId: job_id,
-          recipeTitle: result.recipe_title,
-          textLength: result.recipe_text.length,
-        });
+      // Use simplified recipe format directly
+      logger.info("Using simplified recipe format from backend", {
+        jobId: job_id,
+        recipeTitle: result.recipe_title,
+        textLength: result.recipe_text.length,
+        recipeReady: result.recipe_ready,
+      });
 
-        await editMessageText(
-          {
-            chat_id: chat_id,
-            message_id: message_id,
-            text: result.recipe_text,
-            parse_mode: "MarkdownV2",
-          },
-          bot_token,
-        );
+      await editMessageText(
+        {
+          chat_id: chat_id,
+          message_id: message_id,
+          text: result.recipe_text,
+          parse_mode: "MarkdownV2",
+        },
+        bot_token,
+      );
 
-        logger.info("Successfully updated message with pre-formatted recipe", {
-          jobId: job_id,
-          chatId: chat_id,
-          recipeTitle: result.recipe_title,
-        });
-
-      } else if (result.recipe) {
-        // Fallback to old recipe format for backward compatibility
-        const recipe = result.recipe;
-        
-        logger.debug("Using legacy recipe format from backend", {
-          jobId: job_id,
-          title: recipe.title,
-          ingredientsCount: recipe.ingredients?.length || 0,
-          instructionsCount: recipe.instructions?.length || 0,
-        });
-
-        const formattedRecipe = formatRecipeMessage({
-          title: recipe.title || recipe.recipe_title || "Recipe from Video",
-          ingredients: (recipe.ingredients || []).map(ing => ({
-            item: ing.name || ing.item || "",
-            amount: ing.amount && ing.unit ? `${ing.amount} ${ing.unit}`.trim() : (ing.amount || ""),
-            preparation: ing.notes || ing.preparation || "",
-          })),
-          equipment: (recipe.equipment || []).map(eq => eq.item || "").filter(Boolean),
-          instructions: (recipe.instructions || []).map(inst => ({
-            step: inst.step || inst.step_number || 0,
-            description: inst.instruction || inst.action || "",
-            duration: inst.time || inst.duration || "",
-          })),
-          prepTime: recipe.prep_time_minutes ? `${recipe.prep_time_minutes} minutes` : undefined,
-          cookTime: recipe.cook_time_minutes ? `${recipe.cook_time_minutes} minutes` : undefined,
-          totalTime: recipe.total_time_minutes ? `${recipe.total_time_minutes} minutes` : undefined,
-          servings: recipe.servings ? (typeof recipe.servings === 'string' ? parseInt(recipe.servings) : recipe.servings) : undefined,
-          difficulty: recipe.difficulty_level,
-          notes: recipe.notes_and_tips?.join('\n• '),
-        });
-
-        await editMessageText(
-          {
-            chat_id: chat_id,
-            message_id: message_id,
-            text: formattedRecipe,
-            parse_mode: "MarkdownV2",
-          },
-          bot_token,
-        );
-
-        logger.info("Successfully updated message with legacy recipe format", {
-          jobId: job_id,
-          chatId: chat_id,
-          recipeTitle: recipe.title,
-        });
-      }
+      logger.info("Successfully updated message with simplified recipe format", {
+        jobId: job_id,
+        chatId: chat_id,
+        recipeTitle: result.recipe_title,
+      });
 
     } else if (status === 'failed') {
       // Update message with error
@@ -314,101 +264,160 @@ export function isValidWebhookPayload(payload: any): payload is VideoAnalysisWeb
   // Log detailed validation info for debugging
   logger.info("[isValidWebhookPayload] Validating payload", {
     hasPayload: !!payload,
+    payloadType: typeof payload,
     jobId: { exists: !!payload?.job_id, type: typeof payload?.job_id, value: payload?.job_id },
     status: { exists: !!payload?.status, type: typeof payload?.status, value: payload?.status },
-    callbackData: { exists: !!payload?.callback_data, type: typeof payload?.callback_data },
-    chatId: { 
-      exists: !!payload?.callback_data?.chat_id, 
-      type: typeof payload?.callback_data?.chat_id, 
+    hasResult: !!payload?.result,
+    hasCallbackData: !!payload?.callback_data,
+    chatId: {
+      exists: !!payload?.callback_data?.chat_id,
+      type: typeof payload?.callback_data?.chat_id,
       value: payload?.callback_data?.chat_id,
       isNumber: typeof payload?.callback_data?.chat_id === 'number',
       canConvertToNumber: !isNaN(Number(payload?.callback_data?.chat_id))
     },
-    messageId: { 
-      exists: !!payload?.callback_data?.message_id, 
-      type: typeof payload?.callback_data?.message_id, 
+    messageId: {
+      exists: !!payload?.callback_data?.message_id,
+      type: typeof payload?.callback_data?.message_id,
       value: payload?.callback_data?.message_id,
       isNumber: typeof payload?.callback_data?.message_id === 'number',
       canConvertToNumber: !isNaN(Number(payload?.callback_data?.message_id))
     },
-    botToken: { 
-      exists: !!payload?.callback_data?.bot_token, 
-      type: typeof payload?.callback_data?.bot_token, 
-      length: payload?.callback_data?.bot_token?.length 
+    botToken: {
+      exists: !!payload?.callback_data?.bot_token,
+      type: typeof payload?.callback_data?.bot_token,
+      length: payload?.callback_data?.bot_token?.length
     }
   });
 
   // Basic structure validation
-  if (!payload) {
-    logger.error("[isValidWebhookPayload] Payload is null or undefined");
-    return false;
-  }
-
-  if (typeof payload.job_id !== 'string') {
-    logger.error("[isValidWebhookPayload] job_id is not a string", { 
-      type: typeof payload.job_id, 
-      value: payload.job_id 
+  if (!payload || typeof payload !== 'object') {
+    logger.error("[isValidWebhookPayload] Payload is null, undefined, or not an object", {
+      received: payload,
+      type: typeof payload
     });
     return false;
   }
 
+  // Validate job_id
+  if (typeof payload.job_id !== 'string' || !payload.job_id.trim()) {
+    logger.error("[isValidWebhookPayload] Invalid or missing job_id", {
+      actualType: typeof payload.job_id,
+      value: payload.job_id,
+      isEmpty: typeof payload.job_id === 'string' && !payload.job_id.trim()
+    });
+    return false;
+  }
+
+  // Validate status
   if (payload.status !== 'completed' && payload.status !== 'failed') {
-    logger.error("[isValidWebhookPayload] Invalid status", { 
-      status: payload.status, 
-      type: typeof payload.status 
+    logger.error("[isValidWebhookPayload] Invalid status value", {
+      status: payload.status,
+      type: typeof payload.status,
+      expected: ['completed', 'failed']
     });
     return false;
   }
 
+  // Validate callback_data exists
   if (!payload.callback_data) {
-    logger.error("[isValidWebhookPayload] callback_data is missing");
+    logger.error("[isValidWebhookPayload] callback_data is missing or null");
     return false;
   }
 
-  // More flexible chat_id validation - accept numbers or numeric strings
+  // Validate result structure when status is 'completed'
+  if (payload.status === 'completed') {
+    if (!payload.result) {
+      logger.error("[isValidWebhookPayload] result is required when status is 'completed'");
+      return false;
+    }
+
+    if (typeof payload.result.recipe_text !== 'string' || !payload.result.recipe_text.trim()) {
+      logger.error("[isValidWebhookPayload] Invalid or missing recipe_text in result", {
+        actualType: typeof payload.result.recipe_text,
+        value: payload.result.recipe_text,
+        isEmpty: typeof payload.result.recipe_text === 'string' && !payload.result.recipe_text.trim()
+      });
+      return false;
+    }
+
+    if (typeof payload.result.recipe_title !== 'string' || !payload.result.recipe_title.trim()) {
+      logger.error("[isValidWebhookPayload] Invalid or missing recipe_title in result", {
+        actualType: typeof payload.result.recipe_title,
+        value: payload.result.recipe_title,
+        isEmpty: typeof payload.result.recipe_title === 'string' && !payload.result.recipe_title.trim()
+      });
+      return false;
+    }
+
+    if (typeof payload.result.recipe_ready !== 'boolean') {
+      logger.error("[isValidWebhookPayload] Invalid or missing recipe_ready in result", {
+        actualType: typeof payload.result.recipe_ready,
+        value: payload.result.recipe_ready
+      });
+      return false;
+    }
+  }
+
+  // Validate callback_data.chat_id
   const chatId = payload.callback_data.chat_id;
-  if (typeof chatId !== 'number' && (typeof chatId !== 'string' || isNaN(Number(chatId)))) {
-    logger.error("[isValidWebhookPayload] chat_id is not a valid number", { 
-      type: typeof chatId, 
+  if (typeof chatId !== 'number' && (typeof chatId !== 'string' || isNaN(Number(chatId)) || !String(chatId).trim())) {
+    logger.error("[isValidWebhookPayload] chat_id is not a valid number", {
+      actualType: typeof chatId,
       value: chatId,
-      canConvert: !isNaN(Number(chatId))
+      canConvert: typeof chatId === 'string' && !isNaN(Number(chatId)),
+      isEmpty: typeof chatId === 'string' && !String(chatId).trim()
     });
     return false;
   }
 
-  // More flexible message_id validation - accept numbers or numeric strings
+  // Validate callback_data.message_id
   const messageId = payload.callback_data.message_id;
-  if (typeof messageId !== 'number' && (typeof messageId !== 'string' || isNaN(Number(messageId)))) {
-    logger.error("[isValidWebhookPayload] message_id is not a valid number", { 
-      type: typeof messageId, 
+  if (typeof messageId !== 'number' && (typeof messageId !== 'string' || isNaN(Number(messageId)) || !String(messageId).trim())) {
+    logger.error("[isValidWebhookPayload] message_id is not a valid number", {
+      actualType: typeof messageId,
       value: messageId,
-      canConvert: !isNaN(Number(messageId))
+      canConvert: typeof messageId === 'string' && !isNaN(Number(messageId)),
+      isEmpty: typeof messageId === 'string' && !String(messageId).trim()
     });
     return false;
   }
 
-  if (typeof payload.callback_data.bot_token !== 'string') {
-    logger.error("[isValidWebhookPayload] bot_token is not a string", { 
-      type: typeof payload.callback_data.bot_token 
+  // Validate callback_data.bot_token
+  if (typeof payload.callback_data.bot_token !== 'string' || !payload.callback_data.bot_token.trim()) {
+    logger.error("[isValidWebhookPayload] bot_token is not a valid string", {
+      actualType: typeof payload.callback_data.bot_token,
+      value: payload.callback_data.bot_token,
+      isEmpty: typeof payload.callback_data.bot_token === 'string' && !payload.callback_data.bot_token.trim()
     });
     return false;
   }
 
   // Type coercion for numeric fields to ensure compatibility
   if (typeof payload.callback_data.chat_id === 'string') {
+    const originalValue = payload.callback_data.chat_id;
     payload.callback_data.chat_id = Number(payload.callback_data.chat_id);
     logger.info("[isValidWebhookPayload] Converted chat_id from string to number", {
+      originalValue,
       newValue: payload.callback_data.chat_id
     });
   }
 
   if (typeof payload.callback_data.message_id === 'string') {
+    const originalValue = payload.callback_data.message_id;
     payload.callback_data.message_id = Number(payload.callback_data.message_id);
     logger.info("[isValidWebhookPayload] Converted message_id from string to number", {
+      originalValue,
       newValue: payload.callback_data.message_id
     });
   }
 
-  logger.info("[isValidWebhookPayload] Validation passed");
+  logger.info("[isValidWebhookPayload] Validation passed for simplified format", {
+    jobId: payload.job_id,
+    status: payload.status,
+    hasRecipeText: !!payload.result?.recipe_text,
+    recipeTitle: payload.result?.recipe_title,
+    recipeReady: payload.result?.recipe_ready
+  });
   return true;
 }

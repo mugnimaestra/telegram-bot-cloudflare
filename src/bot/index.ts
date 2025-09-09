@@ -253,14 +253,28 @@ app.post("/webhook/video-analysis", async (c) => {
   // Verify webhook secret environment configuration
   if (!c.env.WEBHOOK_SECRET) {
     logger.error("[Video Job Webhook] WEBHOOK_SECRET environment variable not configured");
-    return new Response("Server configuration error: Missing webhook secret", { status: 500 });
+    return new Response(JSON.stringify({
+      error: "Server configuration error",
+      message: "WEBHOOK_SECRET environment variable is not configured on the server",
+      help: "Please contact the administrator to ensure the webhook secret is properly set"
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   // Verify webhook secret
   const providedSecret = c.req.header("X-Webhook-Secret");
   if (!providedSecret) {
     logger.error("[Video Job Webhook] Missing webhook secret header");
-    return new Response("Missing webhook secret", { status: 401 });
+    return new Response(JSON.stringify({
+      error: "Authentication failed",
+      message: "Missing required 'X-Webhook-Secret' header",
+      help: "Ensure your webhook request includes the 'X-Webhook-Secret' header with the correct secret value"
+    }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   logger.info("[Video Job Webhook] Webhook secret validation", {
@@ -271,7 +285,14 @@ app.post("/webhook/video-analysis", async (c) => {
 
   if (providedSecret !== c.env.WEBHOOK_SECRET) {
     logger.error("[Video Job Webhook] Webhook secret mismatch");
-    return new Response("Invalid webhook secret", { status: 401 });
+    return new Response(JSON.stringify({
+      error: "Authentication failed",
+      message: "Invalid webhook secret provided",
+      help: "Verify that the 'X-Webhook-Secret' header contains the correct secret value"
+    }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   let payload: VideoAnalysisWebhookPayload;
@@ -290,9 +311,18 @@ app.post("/webhook/video-analysis", async (c) => {
     if (rawBody.length > MAX_PAYLOAD_SIZE) {
       logger.error("[Video Job Webhook] Payload too large", {
         size: rawBody.length,
-        maxSize: MAX_PAYLOAD_SIZE
+        maxSize: MAX_PAYLOAD_SIZE,
+        sizeInMB: Math.round(rawBody.length / (1024 * 1024)),
+        maxSizeInMB: Math.round(MAX_PAYLOAD_SIZE / (1024 * 1024))
       });
-      return new Response("Payload too large", { status: 413 });
+      return new Response(JSON.stringify({
+        error: "Payload too large",
+        message: `Webhook payload size (${Math.round(rawBody.length / (1024 * 1024))}MB) exceeds maximum allowed size (${Math.round(MAX_PAYLOAD_SIZE / (1024 * 1024))}MB)`,
+        help: "Reduce the size of your webhook payload or contact support if you need larger payloads"
+      }), {
+        status: 413,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     // Validate JSON structure before parsing
@@ -301,9 +331,23 @@ app.post("/webhook/video-analysis", async (c) => {
         startsWithBrace: rawBody.trim().startsWith('{'),
         endsWithBrace: rawBody.trim().endsWith('}'),
         firstChars: rawBody.substring(0, 10),
-        lastChars: rawBody.substring(Math.max(0, rawBody.length - 10))
+        lastChars: rawBody.substring(Math.max(0, rawBody.length - 10)),
+        trimmedLength: rawBody.trim().length
       });
-      return new Response("Invalid JSON structure", { status: 400 });
+      return new Response(JSON.stringify({
+        error: "Invalid JSON structure",
+        message: "Webhook payload must be a valid JSON object starting with '{' and ending with '}'",
+        help: "Ensure your webhook payload is properly formatted as a JSON object",
+        debug: {
+          startsWithBrace: rawBody.trim().startsWith('{'),
+          endsWithBrace: rawBody.trim().endsWith('}'),
+          firstChars: rawBody.substring(0, 10),
+          lastChars: rawBody.substring(Math.max(0, rawBody.length - 10))
+        }
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     // Parse JSON with error handling
@@ -320,14 +364,33 @@ app.post("/webhook/video-analysis", async (c) => {
     });
     
   } catch (error) {
-    logger.error("[Video Job Webhook] JSON parsing failed", { 
-      error: error instanceof Error ? error.message : String(error),
-      errorName: error instanceof Error ? error.name : "Unknown",
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : "Unknown";
+    const isSyntaxError = error instanceof SyntaxError;
+    
+    logger.error("[Video Job Webhook] JSON parsing failed", {
+      error: errorMessage,
+      errorName: errorName,
       rawBodyLength: rawBody.length,
       rawBodyPreview: rawBody.substring(0, 200) || "No body",
-      isParseError: error instanceof SyntaxError
+      isParseError: isSyntaxError
     });
-    return new Response("Invalid JSON format", { status: 400 });
+    
+    return new Response(JSON.stringify({
+      error: "Invalid JSON format",
+      message: "Failed to parse webhook payload as valid JSON",
+      help: "Ensure your webhook payload is valid JSON format",
+      debug: {
+        errorType: errorName,
+        errorMessage: isSyntaxError ? errorMessage : "JSON parsing error",
+        rawBodyLength: rawBody.length,
+        rawBodyPreview: rawBody.substring(0, 200) || "No body",
+        isSyntaxError: isSyntaxError
+      }
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   // Log payload structure for debugging - using unknown type for safety
@@ -347,7 +410,45 @@ app.post("/webhook/video-analysis", async (c) => {
   // Validate payload structure with detailed logging
   if (!isValidWebhookPayload(payload)) {
     logger.error("[Video Job Webhook] Payload validation failed - see isValidWebhookPayload logs for details");
-    return new Response("Invalid payload structure", { status: 400 });
+    
+    // Provide detailed error information about expected payload structure
+    return new Response(JSON.stringify({
+      error: "Invalid payload structure",
+      message: "Webhook payload does not match expected format",
+      help: "Ensure your payload follows the required structure for video analysis webhooks",
+      expectedStructure: {
+        job_id: "string (required)",
+        status: "'completed' or 'failed' (required)",
+        callback_data: {
+          chat_id: "number (required)",
+          message_id: "number (required)",
+          bot_token: "string (required)"
+        },
+        result: {
+          recipe_text: "string (required when status='completed')",
+          recipe_title: "string (required when status='completed')",
+          recipe_ready: "boolean (required when status='completed')"
+        },
+        error: "string (optional, when status='failed')",
+        error_type: "'size_context_limit' | 'processing_error' | 'network_error' | 'unknown_error' (optional)",
+        error_details: {
+          max_size_mb: "number (optional)",
+          max_duration_seconds: "number (optional)",
+          max_frames: "number (optional)",
+          suggested_actions: "string[] (optional)"
+        }
+      },
+      receivedPayload: {
+        hasJobId: hasJobId,
+        hasStatus: hasStatus,
+        hasCallbackData: hasCallbackData,
+        payloadType: typeof unknownPayload,
+        isObject: typeof unknownPayload === 'object' && unknownPayload !== null
+      }
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   logger.info("[Video Job Webhook] Payload validation passed");
@@ -364,7 +465,31 @@ app.post("/webhook/video-analysis", async (c) => {
     logger.error("[Video Job Webhook] Processing failed", {
       error: result.error,
     });
-    return new Response(result.error || "Processing failed", { status: 400 });
+    
+    // Check if it's a "Job not found" error
+    if (result.error === "Job not found") {
+      logger.warn("[Video Job Webhook] Job not found - likely already processed or expired", {
+        jobId: payload.job_id
+      });
+      // Return 200 OK to acknowledge receipt and prevent retries
+      // The job might have been already processed or expired
+      return new Response("Job not found - acknowledged", { status: 200 });
+    }
+    
+    // For other errors, return 400 with detailed error information
+    return new Response(JSON.stringify({
+      error: "Processing failed",
+      message: result.error || "Failed to process webhook payload",
+      help: "Check the webhook payload format and ensure all required fields are properly formatted",
+      debug: {
+        jobId: payload.job_id,
+        status: payload.status,
+        processingError: result.error
+      }
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   logger.info("[Video Job Webhook] Successfully processed job completion");
