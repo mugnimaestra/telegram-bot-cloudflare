@@ -187,6 +187,107 @@ describe("Size Context Limitation Handling", () => {
       expect(callArgs.text).not.toContain("Size/Context Limitation Detected");
       expect(callArgs.text).toContain("Sending a clearer cooking video");
     });
+
+    it("should handle api_error with Go API specific details", async () => {
+      const apiErrorPayload: VideoAnalysisWebhookPayload = {
+        job_id: "test-job-api-123",
+        status: "failed",
+        error: "API processing error",
+        error_type: "api_error",
+        error_details: {
+          estimated_tokens: 15000,
+          largest_model_capacity: 32000,
+          model_name: "gemini-pro-vision",
+          suggestions: [
+            "Try again with a shorter video",
+            "Ensure the video clearly shows cooking steps",
+            "Check if the video format is supported"
+          ]
+        },
+        callback_data: {
+          chat_id: 456,
+          message_id: 789,
+          bot_token: mockBotToken,
+        },
+      };
+
+      const result = await handleVideoJobWebhook(
+        apiErrorPayload,
+        mockWebhookSecret,
+        mockWebhookSecret,
+      );
+
+      expect(result.success).toBe(true);
+      expect(editMessageTextMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining("API Error Detected"),
+        }),
+        mockBotToken,
+      );
+      
+      const callArgs = editMessageTextMock.mock.calls[0][0];
+      expect(callArgs.text).toContain("API Error Detected");
+      expect(callArgs.text).toContain("Estimated tokens required: 15000");
+      expect(callArgs.text).toContain("Largest model capacity: 32000");
+      expect(callArgs.text).toContain("Model: gemini-pro-vision");
+      expect(callArgs.text).toContain("Try again with a shorter video");
+      
+      expect(loggerMock.error).toHaveBeenCalledWith(
+        "Video analysis job failed",
+        expect.objectContaining({
+          jobId: "test-job-api-123",
+          errorType: "api_error",
+          errorDetails: expect.objectContaining({
+            estimated_tokens: 15000,
+            largest_model_capacity: 32000,
+            model_name: "gemini-pro-vision",
+          }),
+        })
+      );
+    });
+
+    it("should handle api_error with fallback to suggested_actions", async () => {
+      const apiErrorPayload: VideoAnalysisWebhookPayload = {
+        job_id: "test-job-api-456",
+        status: "failed",
+        error: "API error with suggested_actions",
+        error_type: "api_error",
+        error_details: {
+          estimated_tokens: 20000,
+          suggested_actions: [
+            "Use a shorter video",
+            "Reduce video resolution",
+            "Check video format"
+          ]
+        },
+        callback_data: {
+          chat_id: 456,
+          message_id: 789,
+          bot_token: mockBotToken,
+        },
+      };
+
+      const result = await handleVideoJobWebhook(
+        apiErrorPayload,
+        mockWebhookSecret,
+        mockWebhookSecret,
+      );
+
+      expect(result.success).toBe(true);
+      expect(editMessageTextMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining("API Error Detected"),
+        }),
+        mockBotToken,
+      );
+      
+      const callArgs = editMessageTextMock.mock.calls[0][0];
+      expect(callArgs.text).toContain("API Error Detected");
+      expect(callArgs.text).toContain("Estimated tokens required: 20000");
+      expect(callArgs.text).toContain("Use a shorter video");
+      expect(callArgs.text).toContain("Reduce video resolution");
+      expect(callArgs.text).toContain("Check video format");
+    });
   });
 
   describe("Job Status Formatting", () => {

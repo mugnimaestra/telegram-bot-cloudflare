@@ -186,6 +186,35 @@ export function formatJobStatusMessage(
         message += `• Reduce video resolution\n`;
         message += `• Focus on key cooking steps only\n`;
       }
+    } else if (job.error_type === 'api_error') {
+      message += `\n🔧 API Error Detected\n`;
+      message += `Error: ${job.error || 'API processing error'}\n`;
+      
+      if (job.error_details?.estimated_tokens) {
+        message += `• Estimated tokens required: ${job.error_details.estimated_tokens}\n`;
+      }
+      if (job.error_details?.largest_model_capacity) {
+        message += `• Largest model capacity: ${job.error_details.largest_model_capacity}\n`;
+      }
+      if (job.error_details?.model_name) {
+        message += `• Model: ${job.error_details.model_name}\n`;
+      }
+      
+      message += `\n💡 Suggestions:\n`;
+      if (job.error_details?.suggestions && job.error_details.suggestions.length > 0) {
+        job.error_details.suggestions.forEach(suggestion => {
+          message += `• ${suggestion}\n`;
+        });
+      } else if (job.error_details?.suggested_actions && job.error_details.suggested_actions.length > 0) {
+        job.error_details.suggested_actions.forEach(action => {
+          message += `• ${action}\n`;
+        });
+      } else {
+        message += `• Try again with a shorter video\n`;
+        message += `• Ensure the video clearly shows cooking steps\n`;
+        message += `• Check if the video format is supported\n`;
+        message += `• Contact support if the issue persists\n`;
+      }
     } else if (job.error) {
       message += `\n❌ Error: ${job.error}\n`;
     }

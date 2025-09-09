@@ -172,7 +172,6 @@ export function generateWebhookHash(payload: VideoAnalysisWebhookPayload): strin
   const hashData = {
     jobId: payload.job_id,
     status: payload.status,
-    timestamp: Date.now(),
     callbackData: payload.callback_data
   };
   

@@ -52,11 +52,9 @@ describe('webhookRetryHandler', () => {
       job_id: 'test-job-123',
       status: 'completed',
       result: {
-        recipe: {
-          title: 'Test Recipe',
-          ingredients: [],
-          instructions: []
-        }
+        recipe_text: '# Test Recipe\n\n## Ingredients\n- Ingredient 1\n- Ingredient 2\n\n## Instructions\n1. Step 1\n2. Step 2',
+        recipe_title: 'Test Recipe',
+        recipe_ready: true
       },
       callback_data: {
         chat_id: 123456789,

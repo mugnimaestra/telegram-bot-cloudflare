@@ -102,6 +102,33 @@ export async function handleVideoJobWebhook(
             '• Reduce video resolution if file size is too large'
           ];
         }
+      } else if (error_type === 'api_error') {
+        // Handle Go API specific errors
+        errorDetails = `\n🔧 *API Error Detected*\n`;
+        
+        if (error_details?.estimated_tokens) {
+          errorDetails += `• Estimated tokens required: ${error_details.estimated_tokens}\n`;
+        }
+        if (error_details?.largest_model_capacity) {
+          errorDetails += `• Largest model capacity: ${error_details.largest_model_capacity}\n`;
+        }
+        if (error_details?.model_name) {
+          errorDetails += `• Model: ${error_details.model_name}\n`;
+        }
+
+        // Use suggestions from the Go API if available, otherwise fallback to suggested_actions
+        if (error_details?.suggestions && error_details.suggestions.length > 0) {
+          suggestedActions = error_details.suggestions.map(action => `• ${action}`);
+        } else if (error_details?.suggested_actions && error_details.suggested_actions.length > 0) {
+          suggestedActions = error_details.suggested_actions.map(action => `• ${action}`);
+        } else {
+          suggestedActions = [
+            '• Try again with a shorter video',
+            '• Ensure the video clearly shows cooking steps',
+            '• Check if the video format is supported',
+            '• Contact support if the issue persists'
+          ];
+        }
       }
 
       await editMessageText(
@@ -356,6 +383,149 @@ export function isValidWebhookPayload(payload: any): payload is VideoAnalysisWeb
         value: payload.result.recipe_ready
       });
       return false;
+    }
+  }
+
+  // Validate error structure when status is 'failed'
+  if (payload.status === 'failed') {
+    // Validate error field
+    if (typeof payload.error !== 'string' || !payload.error.trim()) {
+      logger.error("[isValidWebhookPayload] Invalid or missing error field when status is 'failed'", {
+        actualType: typeof payload.error,
+        value: payload.error,
+        isEmpty: typeof payload.error === 'string' && !payload.error.trim()
+      });
+      return false;
+    }
+
+    // Validate error_type if present
+    if (payload.error_type !== undefined) {
+      const validErrorTypes = ['size_context_limit', 'processing_error', 'network_error', 'unknown_error', 'api_error'];
+      if (!validErrorTypes.includes(payload.error_type)) {
+        logger.error("[isValidWebhookPayload] Invalid error_type value", {
+          errorType: payload.error_type,
+          type: typeof payload.error_type,
+          expected: validErrorTypes
+        });
+        return false;
+      }
+      
+      logger.info("[isValidWebhookPayload] Valid error_type detected", {
+        errorType: payload.error_type
+      });
+    }
+
+    // Validate error_details if present - accept both original and Go API formats
+    if (payload.error_details !== undefined) {
+      if (typeof payload.error_details !== 'object' || payload.error_details === null) {
+        logger.error("[isValidWebhookPayload] error_details is not an object", {
+          actualType: typeof payload.error_details,
+          value: payload.error_details
+        });
+        return false;
+      }
+
+      const errorDetails = payload.error_details;
+      
+      // Check for original format fields
+      const hasOriginalFormatFields =
+        errorDetails.max_size_mb !== undefined ||
+        errorDetails.max_duration_seconds !== undefined ||
+        errorDetails.max_frames !== undefined ||
+        errorDetails.suggested_actions !== undefined;
+
+      // Check for Go API format fields
+      const hasGoApiFormatFields =
+        errorDetails.estimated_tokens !== undefined ||
+        errorDetails.largest_model_capacity !== undefined ||
+        errorDetails.model_name !== undefined ||
+        errorDetails.suggestions !== undefined;
+
+      // Validate that error_details contains at least one valid field from either format
+      if (!hasOriginalFormatFields && !hasGoApiFormatFields) {
+        logger.error("[isValidWebhookPayload] error_details contains no valid fields from either format", {
+          errorDetails,
+          originalFormatFields: ['max_size_mb', 'max_duration_seconds', 'max_frames', 'suggested_actions'],
+          goApiFormatFields: ['estimated_tokens', 'largest_model_capacity', 'model_name', 'suggestions']
+        });
+        return false;
+      }
+
+      // Validate individual fields if they exist
+      // Original format fields validation
+      if (errorDetails.max_size_mb !== undefined && typeof errorDetails.max_size_mb !== 'number') {
+        logger.error("[isValidWebhookPayload] Invalid max_size_mb in error_details", {
+          actualType: typeof errorDetails.max_size_mb,
+          value: errorDetails.max_size_mb
+        });
+        return false;
+      }
+
+      if (errorDetails.max_duration_seconds !== undefined && typeof errorDetails.max_duration_seconds !== 'number') {
+        logger.error("[isValidWebhookPayload] Invalid max_duration_seconds in error_details", {
+          actualType: typeof errorDetails.max_duration_seconds,
+          value: errorDetails.max_duration_seconds
+        });
+        return false;
+      }
+
+      if (errorDetails.max_frames !== undefined && typeof errorDetails.max_frames !== 'number') {
+        logger.error("[isValidWebhookPayload] Invalid max_frames in error_details", {
+          actualType: typeof errorDetails.max_frames,
+          value: errorDetails.max_frames
+        });
+        return false;
+      }
+
+      if (errorDetails.suggested_actions !== undefined && (!Array.isArray(errorDetails.suggested_actions) ||
+          !errorDetails.suggested_actions.every((action: string) => typeof action === 'string'))) {
+        logger.error("[isValidWebhookPayload] Invalid suggested_actions in error_details", {
+          actualType: typeof errorDetails.suggested_actions,
+          value: errorDetails.suggested_actions
+        });
+        return false;
+      }
+
+      // Go API format fields validation
+      if (errorDetails.estimated_tokens !== undefined && typeof errorDetails.estimated_tokens !== 'number') {
+        logger.error("[isValidWebhookPayload] Invalid estimated_tokens in error_details", {
+          actualType: typeof errorDetails.estimated_tokens,
+          value: errorDetails.estimated_tokens
+        });
+        return false;
+      }
+
+      if (errorDetails.largest_model_capacity !== undefined && typeof errorDetails.largest_model_capacity !== 'number') {
+        logger.error("[isValidWebhookPayload] Invalid largest_model_capacity in error_details", {
+          actualType: typeof errorDetails.largest_model_capacity,
+          value: errorDetails.largest_model_capacity
+        });
+        return false;
+      }
+
+      if (errorDetails.model_name !== undefined && (typeof errorDetails.model_name !== 'string' || !errorDetails.model_name.trim())) {
+        logger.error("[isValidWebhookPayload] Invalid model_name in error_details", {
+          actualType: typeof errorDetails.model_name,
+          value: errorDetails.model_name,
+          isEmpty: typeof errorDetails.model_name === 'string' && !errorDetails.model_name.trim()
+        });
+        return false;
+      }
+
+      if (errorDetails.suggestions !== undefined && (!Array.isArray(errorDetails.suggestions) ||
+          !errorDetails.suggestions.every((suggestion: string) => typeof suggestion === 'string'))) {
+        logger.error("[isValidWebhookPayload] Invalid suggestions in error_details", {
+          actualType: typeof errorDetails.suggestions,
+          value: errorDetails.suggestions
+        });
+        return false;
+      }
+
+      logger.info("[isValidWebhookPayload] Valid error_details detected", {
+        hasOriginalFormatFields,
+        hasGoApiFormatFields,
+        errorDetails
+      });
     }
   }
 

@@ -415,7 +415,7 @@ function extractJSONFromContent(content: string): string | null {
   }
 }
 
-function parseRecipeResponse(content: string): CookingRecipe | null {
+export function parseRecipeResponse(content: string): CookingRecipe | null {
   try {
     // Try to find JSON in the response
 
@@ -442,18 +442,48 @@ function parseRecipeResponse(content: string): CookingRecipe | null {
     }
 
     // Validate the structure - allow partial recipes missing some fields
-    if (!recipe.title || !recipe.ingredients) {
+    // FIX: Accept both 'title' and 'recipe_title' fields
+    const title = recipe.title || recipe.recipe_title;
+    if (!title || !recipe.ingredients) {
       logger.error("Invalid recipe structure from API response", {
-        hasTitle: !!recipe.title,
+        hasTitle: !!title,
         ingredientsLength: recipe.ingredients?.length,
         instructionsLength: recipe.instructions?.length,
       });
       return null;
     }
 
+    // FIX: Normalize the title field
+    recipe.title = title;
+
     // Initialize missing optional fields
     if (!recipe.instructions) recipe.instructions = [];
     if (!recipe.equipment) recipe.equipment = [];
+
+    // FIX: Handle mixed techniques array (objects and strings)
+    if (recipe.techniques && Array.isArray(recipe.techniques)) {
+      recipe.techniques = recipe.techniques.map((technique: any) => {
+        if (typeof technique === 'string') {
+          // Only include non-empty strings
+          const trimmed = technique.trim();
+          return trimmed || null;
+        } else if (technique && typeof technique === 'object') {
+          // If it's an object, ONLY extract the name field (not description)
+          // This ensures objects without a name are filtered out
+          const name = technique.name;
+          
+          if (name && typeof name === 'string' && name.trim()) {
+            return name.trim();
+          } else {
+            // Filter out objects without a valid name field
+            return null;
+          }
+        } else {
+          // Filter out invalid techniques by returning null
+          return null;
+        }
+      }).filter((technique: string | null) => technique !== null);
+    }
 
     return recipe as CookingRecipe;
   } catch (error) {

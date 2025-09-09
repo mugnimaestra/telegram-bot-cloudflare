@@ -92,12 +92,16 @@ export interface VideoAnalysisJobStatus {
     };
   };
   error?: string;
-  error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error";
+  error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error" | "api_error";
   error_details?: {
     max_size_mb?: number;
     max_duration_seconds?: number;
     max_frames?: number;
     suggested_actions?: string[];
+    estimated_tokens?: number;
+    largest_model_capacity?: number;
+    model_name?: string;
+    suggestions?: string[];
   };
 }
 
@@ -111,12 +115,16 @@ export interface VideoAnalysisWebhookPayload {
     recipe_ready: boolean;
   };
   error?: string;
-  error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error";
+  error_type?: "size_context_limit" | "processing_error" | "network_error" | "unknown_error" | "api_error";
   error_details?: {
     max_size_mb?: number;
     max_duration_seconds?: number;
     max_frames?: number;
     suggested_actions?: string[];
+    estimated_tokens?: number;
+    largest_model_capacity?: number;
+    model_name?: string;
+    suggestions?: string[];
   };
   callback_data: {
     chat_id: number;
