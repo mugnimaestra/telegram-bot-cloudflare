@@ -17,6 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Test Connection to Chutes AI
+        run: |
+          echo "Pinging the Chutes AI endpoint..."
+          curl -v -X POST \
+            ${{ secrets.CHUTES_AI_BASE_URL }}/chat/completions \
+            -H "Authorization: Bearer ${{ secrets.CHUTES_AI_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "${{ secrets.CHUTES_AI_MODEL }}",
+              "messages": [{"role": "user", "content": "hello"}]
+            }' --fail
+
       - name: PR Agent action step
         id: pragent
         uses: qodo-ai/pr-agent@main
