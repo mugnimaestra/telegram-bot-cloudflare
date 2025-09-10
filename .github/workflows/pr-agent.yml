@@ -22,10 +22,10 @@ jobs:
         uses: docker://codiumai/pr-agent@sha256:14165e525678ace7d9b51cda8652c2d74abb4e1d76b57c4a6ccaeba84663cc64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.CHUTES_AI_BASE_URL }}
+          OPENAI__KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}
           PR_AGENT_COMMAND: review
-          PR_MODEL: ${{ secrets.CHUTES_AI_MODEL }}
+          config.model: ${{ secrets.CHUTES_AI_MODEL }}
           # Chutes AI specific settings
           PR_MODEL_TEMPERATURE: 0.1
           PR_MODEL_MAX_TOKENS: 4000
@@ -62,10 +62,10 @@ jobs:
         uses: docker://codiumai/pr-agent@sha256:14165e525678ace7d9b51cda8652c2d74abb4e1d76b57c4a6ccaeba84663cc64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.CHUTES_AI_BASE_URL }}
+          OPENAI__KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}
           PR_AGENT_COMMAND: describe
-          PR_MODEL: ${{ secrets.CHUTES_AI_MODEL }}
+          config.model: ${{ secrets.CHUTES_AI_MODEL }}
         with:
           pr_number: ${{ github.event.pull_request.number }}
           repo_full_name: ${{ github.repository }}
