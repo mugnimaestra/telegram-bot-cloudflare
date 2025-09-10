@@ -3,9 +3,9 @@
 
 # Chutes AI endpoint configuration
 [openai]
-key = "env:CHUTES_AI_API_KEY"
-api_base = "env:CHUTES_AI_BASE_URL"
-model = "env:CHUTES_AI_MODEL"
+api_key = "env:OPENAI__KEY"
+api_base = "env:OPENAI__API_BASE"
+model = "env:CONFIG__MODEL"
 
 # PR Reviewer configuration - optimized for GLM-4.5-FP8
 [pr_reviewer]
