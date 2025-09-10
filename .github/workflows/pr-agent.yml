@@ -1,0 +1,48 @@
+name: PR Agent with Chutes AI
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: qodo-ai/pr-agent@main
+        env:
+          # --- This is the key fix ---
+          # Tell PR-Agent to IGNORE any .pr_agent.toml file in the repository
+          CONFIG__USE_REPO_SETTINGS_FILE: "false"
+
+          # --- Standard GitHub token ---
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # --- Configuration for Chutes AI Endpoint ---
+          OPENAI_API_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          OPENAI_API_BASE: "https://llm.chutes.ai/v1"
+          OPENAI__KEY: ${{ secrets.CHUTES_AI_API_KEY }} # Keep for redundancy
+          
+          # --- Model Configuration ---
+          CONFIG__MODEL: "openai/zai-org/GLM-4.5-FP8"
+          CONFIG__FALLBACK_MODELS: '["openai/moonshotai/Kimi-K2-Instruct-0905"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
+          
+          # --- Connection & Timeout Fixes ---
+          LITELLM_USE_REQUESTS: "true"
+          CONFIG__AI_TIMEOUT: "120"
+          
+          # --- Automatic Tool Triggers ---
+          github_action_config.auto_review: true
+          github_action_config.auto_describe: true
+          github_action_config.auto_improve: true

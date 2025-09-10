@@ -514,6 +514,38 @@ app.post(WEBHOOK, async (c) => {
     return new Response("Bad Request", { status: 400 });
   }
 
+  // Log all incoming messages for debugging
+  if (update.message) {
+    logger.info("[Message] Received message", {
+      messageId: update.message.message_id,
+      chatId: update.message.chat.id,
+      chatType: update.message.chat.type,
+      userId: update.message.from?.id,
+      username: update.message.from?.username,
+      text: update.message.text,
+      messageType: update.message.text ? 'text' : 'other',
+      timestamp: new Date(update.message.date * 1000).toISOString()
+    });
+  } else if (update.callback_query) {
+    logger.info("[Message] Received callback query", {
+      callbackQueryId: update.callback_query.id,
+      userId: update.callback_query.from.id,
+      username: update.callback_query.from.username,
+      data: update.callback_query.data,
+      message: update.callback_query.message?.message_id
+    });
+  } else if (update.edited_message) {
+    logger.info("[Message] Received edited message", {
+      messageId: update.edited_message.message_id,
+      chatId: update.edited_message.chat.id,
+      chatType: update.edited_message.chat.type,
+      userId: update.edited_message.from?.id,
+      username: update.edited_message.from?.username,
+      text: update.edited_message.text,
+      timestamp: new Date(update.edited_message.date * 1000).toISOString()
+    });
+  }
+
   try {
     if (update.callback_query) {
       logger.info("[Webhook] Processing callback query", {
