@@ -28,7 +28,6 @@ jobs:
           # Your Chutes AI configuration
           OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}
           OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-          OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}
           CONFIG__MODEL: ${{ secrets.CHUTES_AI_MODEL }}
           
           # For custom models, you must specify the maximum token limit
