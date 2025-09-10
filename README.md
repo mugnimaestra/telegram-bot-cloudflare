@@ -1,12 +1,12 @@
 # UMP9 Bot
 
-A Telegram bot for fetching and viewing NH content with PDF generation and Telegraph viewer support. Built with Cloudflare Workers and R2 storage.
+A Telegram bot for fetching and viewing NH content with PDF generation, Telegraph viewer support, and AI-powered cooking video analysis. Built with Cloudflare Workers and R2 storage.
 
 ## Features
 
 - 🚀 Fast and responsive Telegram bot interface
-- 📄 Automatic PDF generation with status tracking
-- 🔄 Interactive status check and download buttons
+- 📄 Automatic PDF generation with status tracking and interactive buttons
+- 🔄 Real-time PDF generation progress updates
 - 📱 Telegraph viewer fallback for quick access
 - ☁️ Cloudflare R2 storage integration
 - 🔄 Automatic retries and error handling
@@ -17,26 +17,79 @@ A Telegram bot for fetching and viewing NH content with PDF generation and Teleg
 - 🤖 Intelligent analysis using Chutes AI visual models
 - 🍳 Complete recipe documentation from cooking videos
 - 📋 Extracted ingredients, steps, and cooking techniques
+- 🎬 Asynchronous video processing with job tracking
+- 📊 Webhook-based job completion notifications
+- 🔄 Advanced webhook management system
+- 📨 Dead letter queue for failed webhook deliveries
+- 🔍 Webhook status monitoring and manual retry capabilities
+- 📈 Gemini API usage statistics tracking
 - 🤖 Automated code reviews with PR-Agent and Chutes AI
 - 📝 AI-powered pull request descriptions and improvements
+- 🔒 Security features with webhook authentication
 
 ## Commands
 
+### Basic Commands
 - `/help` - Show help message and available commands
 - `/ping` - Check if bot is alive and get a friendly greeting
+- `/usage` - Check Gemini API usage statistics
+
+### NH Content Commands
 - `/nh <id>` - Fetch content and generate PDF/Telegraph viewer
   - Example: `/nh 546408`
   - Example: `/nh https://nhentai.net/g/546408/`
+- `/read <id_or_url>` - Fetch content and generate Telegraph viewer only
+  - Example: `/read 546408`
+  - Example: `/read https://nhentai.net/g/546408/`
+- `/getpdf <id_or_url>` - Fetch content and generate PDF only with real-time progress
+  - Example: `/getpdf 546408`
+  - Example: `/getpdf https://nhentai.net/g/546408/`
+
+### Cooking Video Analysis Commands
 - `/recipe` - Start cooking video analysis mode
   - Example: `/recipe` then send a cooking video
+- `/status <job_id>` - Check video analysis job status
+  - Example: `/status abc12345`
+  - View progress and completion status
+  - Get job details and estimated time remaining
+  - Includes webhook delivery information
 
-### PDF Features
+### Webhook Management Commands
+- `/webhook_status <job_id>` - Check webhook delivery status
+  - Example: `/webhook_status abc12345`
+  - View webhook delivery attempts and timestamps
+  - See error details for failed deliveries
+  - Monitor retry attempts and scheduling
+- `/retry_webhook <job_id>` - Manually retry failed webhook delivery
+  - Example: `/retry_webhook abc12345`
+  - Trigger immediate retry for failed webhooks
+  - Reset retry counters and attempt delivery
+  - Available for failed webhooks with remaining attempts
+
+### Dead Letter Queue Commands
+- `/dead_letter_queue [page]` - List dead letter queue entries
+  - Example: `/dead_letter_queue`
+  - Example: `/dead_letter_queue 2`
+  - View failed webhook deliveries
+  - Paginated list with detailed error information
+- `/retry_dead_letter <entry_id>` - Retry specific dead letter entry
+  - Example: `/retry_dead_letter dead_12345`
+  - Manually retry failed webhook deliveries
+  - Clear error status and redeliver
+- `/clear_dead_letter` - Clear dead letter queue
+  - Example: `/clear_dead_letter`
+  - Remove all entries from dead letter queue
+  - Use with caution - irreversible operation
+
+## PDF Features
 
 - Status tracking with interactive buttons
 - Direct PDF download when ready
 - Status check limit (10 times per gallery)
 - Automatic PDF delivery on completion
 - Fallback to Telegraph viewer if needed
+- Real-time progress updates during generation
+- Error handling with informative messages
 
 ## Cooking Video Recipe Extraction
 
@@ -46,6 +99,8 @@ The bot can analyze cooking videos and extract complete recipes using advanced A
 - 📋 Extract comprehensive recipe information from video demonstrations
 - 📖 Provide formatted recipes with ingredients, steps, and techniques
 - ⏱️ Include timing and equipment details
+- 🎬 Process videos asynchronously with job tracking
+- 📊 Send completion notifications via webhooks
 
 ### Setup
 
@@ -70,7 +125,7 @@ You can use the cooking video feature in multiple ways:
 - **Using /recipe command**: Send `/recipe` command, then upload your cooking video
 - **Forward videos**: Forward a cooking video from another chat or channel
 
-The bot accepts standard video formats (MP4, AVI, MOV, etc.) with a maximum size of **20MB**.
+The bot accepts standard video formats (MP4, AVI, MOV, etc.) with a maximum size determined by the video analyzer service.
 
 ### What Gets Extracted
 
@@ -84,6 +139,17 @@ The AI analyzes the entire cooking video to extract:
 - 🎯 **Cooking techniques** demonstrated
 - 💡 **General tips and additional notes**
 
+### Asynchronous Processing
+
+Cooking video analysis is processed asynchronously:
+
+1. **Job Creation**: When you send a video, the bot creates a job and returns a job ID
+2. **Background Processing**: The video is analyzed in the background by the AI service
+3. **Webhook Notification**: Upon completion, the service sends a webhook to the bot
+4. **Result Delivery**: The bot sends the extracted recipe to your chat
+
+You can check the status of your job using the `/status <job_id>` command.
+
 ### Usage Examples
 
 #### Example 1: Direct Video Upload
@@ -92,6 +158,13 @@ The AI analyzes the entire cooking video to extract:
 User: [sends 15MB MP4 cooking video of "Spaghetti Carbonara"]
 Bot: 🎬 Analyzing cooking video...
 Bot: 🤖 AI is analyzing the cooking steps and ingredients...
+Bot: 📋 Job created successfully!
+Bot: Job ID: abc12345
+Bot: Use /status abc12345 to check progress
+
+[After processing completes]
+Bot: ✅ Recipe extraction complete!
+
 Bot: 🍳 Spaghetti Carbonara
 
 👥 4 servings • ⏱️ Prep: 15 minutes • 🔥 Cook: 10 minutes • ⏰ Total: 25 minutes • 📊 Easy
@@ -127,21 +200,29 @@ While pasta cooks, heat olive oil in a large skillet over medium heat. Add diced
 
 Step 3 [3 minutes]
 Lower heat to medium-low. Add minced garlic and cook for 1 minute until fragrant. Remove from heat if garlic starts to brown.
-
-...
 ```
 
 #### Example 2: Using /recipe Command
 
 ```
 User: /recipe
-Bot: 🎬 Please send a cooking video to analyze. You can:
-• Send a video directly
-• Use /recipe command then send a video
-• Forward a cooking video from another chat
+Bot: 🎬 *Send me a cooking video\!*
+
+I'll analyze it and extract:
+• Complete ingredients list
+• Step\-by\-step instructions
+• Cooking times and temperatures
+• Tips and techniques
+
+⚠️ *Important:* Video size will be validated by the analyzer service
+_Processing is done asynchronously - you'll get a job ID to track progress_
 
 User: [uploads video]
-...same analysis process as above...
+Bot: 🎬 Analyzing cooking video...
+Bot: 🤖 AI is analyzing the cooking steps and ingredients...
+Bot: 📋 Job created successfully!
+Bot: Job ID: def67890
+Bot: Use /status def67890 to check progress
 ```
 
 ### Troubleshooting
@@ -149,7 +230,7 @@ User: [uploads video]
 #### Common Issues and Solutions
 
 **"Video is too large" Error**
-- Solution: Compress or trim your video to under 20MB
+- Solution: Compress or trim your video to meet size requirements
 - Alternative: Use a video editor to reduce quality or duration
 
 **"Failed to analyze video" with no specific error**
@@ -167,7 +248,7 @@ User: [uploads video]
 - Try videos that show ingredient measurements and step-by-step process
 
 **"Analysis timed out"**
-- Cook videos longer than 5 minutes may timeout (90 seconds analysis limit)
+- Long videos may timeout due to processing limits
 - Consider splitting long videos into shorter segments
 
 **"Video format not supported"**
@@ -179,7 +260,203 @@ User: [uploads video]
 - Chutes API has rate limits for video analysis
 - If you get rate-limited errors, wait a few minutes before retrying
 
+**Job Status Issues**
+- Use `/status <job_id>` to check job progress
+- If job is not found, it may have expired or already been processed
+- Jobs are typically kept for 24 hours before cleanup
+
 If issues persist, check the bot logs or contact support for assistance.
+
+## Video Analysis Webhook System
+
+The bot implements a sophisticated webhook system for handling asynchronous video analysis job completion:
+
+### Webhook Architecture
+
+- **Job Submission**: Videos are submitted to the analysis service with a callback URL
+- **Async Processing**: The service processes videos in the background
+- **Webhook Delivery**: Upon completion, the service sends results via webhook
+- **Result Handling**: The bot processes the webhook and delivers results to users
+
+### Webhook Security
+
+- **Secret Authentication**: All webhooks require a `X-Webhook-Secret` header
+- **Environment Configuration**: Secret is configured via `WEBHOOK_SECRET` environment variable
+- **Payload Validation**: All webhook payloads are validated against expected schema
+- **Error Handling**: Detailed error responses for invalid or malformed webhooks
+
+### Retry Mechanism
+
+- **Automatic Retries**: Failed webhook deliveries are retried with exponential backoff
+- **Retry Limits**: Maximum of 3 retry attempts (configurable)
+- **Dead Letter Queue**: Failed deliveries are moved to dead letter queue after retries
+- **Manual Retry**: Dead letter entries can be manually retried via commands
+
+### Webhook Endpoints
+
+- `POST /webhook/video-analysis` - Receives job completion notifications
+- Requires `X-Webhook-Secret` header for authentication
+- Validates payload structure and processes job results
+- Supports both success and failure notifications
+
+### Webhook Management Commands
+
+The bot provides comprehensive webhook management:
+
+- **Status Monitoring**: Check webhook delivery status with `/webhook_status`
+- **Manual Retry**: Retry failed webhooks with `/retry_webhook`
+- **Dead Letter Queue**: View failed deliveries with `/dead_letter_queue`
+- **Queue Management**: Retry individual entries or clear the entire queue
+
+## Advanced Webhook Management
+
+The bot includes advanced webhook management capabilities for monitoring and controlling the delivery of video analysis results:
+
+### Webhook Status Tracking
+
+Each webhook delivery is tracked with detailed information:
+
+- **Delivery Attempts**: Number of delivery attempts made
+- **Timestamps**: When each attempt was made
+- **Error Details**: Specific error messages for failed deliveries
+- **Retry Schedule**: When the next retry will occur
+- **Status Codes**: HTTP status codes from delivery attempts
+
+### Dead Letter Queue
+
+Failed webhook deliveries that exceed retry limits are moved to a dead letter queue:
+
+- **Entry Persistence**: Dead letter entries are stored for 7 days
+- **Detailed Error Information**: Complete error context and payload
+- **Manual Recovery**: Individual entries can be retried manually
+- **Bulk Operations**: Support for clearing the entire queue
+
+### Monitoring and Debugging
+
+- **Detailed Logging**: Comprehensive logging for webhook processing
+- **Error Context**: Rich error information for debugging
+- **Payload Inspection**: Ability to inspect webhook payloads
+- **Delivery Metrics**: Statistics on successful and failed deliveries
+
+## Telegraph Integration Details
+
+The bot integrates with Telegraph for providing quick-access content viewing:
+
+### Telegraph Account Management
+
+- **Automatic Account Creation**: Bot creates Telegraph accounts automatically
+- **Account Reuse**: Existing accounts are reused for efficiency
+- **Error Handling**: Graceful fallback if Telegraph is unavailable
+
+### Page Creation
+
+- **Gallery Pages**: Creates multi-page galleries for content
+- **Content Formatting**: Proper formatting of images and text
+- **Page Limits**: Handles Telegraph's page size limits gracefully
+- **URL Generation**: Generates shareable Telegraph URLs
+
+### Fallback Strategy
+
+- **Primary Fallback**: Telegraph viewer when PDF generation fails
+- **Error Handling**: Informative messages when Telegraph is unavailable
+- **User Experience**: Seamless transition between PDF and Telegraph views
+
+## PR-Agent Integration with Chutes AI
+
+This repository includes automated code review capabilities using PR-Agent (Qodo) integrated with Chutes AI as the OpenAI-compatible endpoint.
+
+### Features
+
+- 🤖 **Automated Code Reviews**: AI-powered analysis of pull requests
+- 📝 **PR Description Generation**: Automatic generation of comprehensive PR descriptions
+- 🔍 **Code Quality Analysis**: TypeScript and Cloudflare Workers specific feedback
+- 🚀 **Performance Optimization**: Suggestions for improving code performance
+- 🛡️ **Security Analysis**: Automated security vulnerability detection
+- 📊 **Test Coverage Analysis**: Feedback on test coverage and quality
+
+### Quick Setup
+
+Get started in 5 minutes with our automated setup:
+
+```bash
+# Install dependencies
+yarn install
+
+# Run the automated setup script
+yarn pr-agent:setup
+
+# Test the integration
+yarn pr-agent:test
+```
+
+For detailed setup instructions, see [SETUP_CHUTES_AI.md](SETUP_CHUTES_AI.md).
+
+### How It Works
+
+1. **On Pull Request Creation**: The GitHub Actions workflow automatically triggers
+2. **Code Analysis**: PR-Agent analyzes the code changes using Chutes AI
+3. **Review Comments**: AI-generated comments are posted on the pull request
+4. **PR Description**: Optional automatic generation of PR descriptions
+
+### Configuration
+
+The integration is configured through:
+- [`.github/workflows/pr-agent.yml`](.github/workflows/pr-agent.yml) - GitHub Actions workflow
+- [`.pr_agent.toml`](.pr_agent.toml) - PR-Agent configuration
+- Environment variables and GitHub secrets
+
+### Testing the Integration
+
+1. Create a new branch: `git checkout -b test-pr-agent`
+2. Make a small change to any TypeScript file
+3. Commit and push your changes
+4. Create a pull request using the [PR template](.github/pull_request_template.md)
+5. Check the Actions tab for workflow execution
+6. Review AI-generated comments on your PR
+
+### Troubleshooting
+
+If you encounter issues with the PR-Agent integration:
+
+1. Check the [troubleshooting guide](.github/ISSUE_TEMPLATE/pr_agent_integration_issue.md)
+2. Run the test script: `yarn pr-agent:test`
+3. Verify GitHub secrets are correctly set
+4. Check the workflow logs in the Actions tab
+
+### Advanced Configuration
+
+For advanced users, you can customize:
+- AI model parameters in [`.pr_agent.toml`](.pr_agent.toml)
+- Review criteria and focus areas
+- Workflow triggers and conditions
+- Notification preferences
+
+See the [full documentation](PR_AGENT_CHUTES_AI_SETUP.md) for more details.
+
+## Security Features
+
+The bot implements multiple security features to ensure safe operation:
+
+### Bot Security
+
+- **Token Authentication**: All bot operations require valid Telegram bot token
+- **Webhook Verification**: Telegram webhooks verified with secret token
+- **Command Validation**: All commands are validated before processing
+- **Rate Limiting**: Protection against spam and abuse
+
+### Webhook Security
+
+- **Secret Authentication**: Video analysis webhooks require secret token
+- **Payload Validation**: All webhook payloads are strictly validated
+- **Size Limits**: Protection against large payload attacks
+- **Schema Validation**: Ensures webhook data matches expected structure
+
+### Data Protection
+
+- **No Data Storage**: User data is not permanently stored
+- **Temporary Processing**: Data is only held during processing
+- **Secure Transfers**: All communications use HTTPS
+- **Access Control**: Limited access to sensitive operations
 
 ## Technical Details
 
@@ -191,10 +468,20 @@ If issues persist, check the bot logs or contact support for assistance.
 - KV namespace for data persistence
 - Vitest for testing
 
+### Architecture
+
+- **Serverless Design**: Fully serverless architecture using Cloudflare Workers
+- **Asynchronous Processing**: Background processing for long-running tasks
+- **Event-Driven**: Webhook-based event handling for job completion
+- **Error Resilience**: Comprehensive error handling and retry mechanisms
+- **Scalable**: Automatically scales with Cloudflare's global network
+
 ### API Endpoints
 
 - `POST /endpoint` - Main webhook endpoint for Telegram updates
   - Requires `X-Telegram-Bot-Api-Secret-Token` header for authentication
+- `POST /webhook/video-analysis` - Video analysis job completion webhook
+  - Requires `X-Webhook-Secret` header for authentication
 - `GET /registerWebhook` - Register bot webhook URL
 - `GET /unRegisterWebhook` - Unregister bot webhook URL
 
@@ -203,12 +490,26 @@ If issues persist, check the bot logs or contact support for assistance.
 Required environment variables in wrangler.toml:
 ```toml
 [vars]
+# Cloudflare Configuration
 CF_ACCOUNT_ID = "your_account_id"
 R2_BUCKET_NAME = "your_bucket_name"
 R2_PUBLIC_URL = "your_r2_public_url"
+
+# API Configuration
 NH_API_URL = "your_nh_api_url"
-# Required for cooking video analysis
+VIDEO_ANALYSIS_SERVICE_URL = "your_video_analysis_service_url"
+
+# Bot Configuration
+ENV_BOT_TOKEN = "your_telegram_bot_token"
+ENV_BOT_SECRET = "your_webhook_secret"
+WEBHOOK_SECRET = "your_webhook_verification_secret"
+
+# AI Service Configuration
 CHUTES_API_TOKEN = "your_chutes_api_token"
+GEMINI_API_KEY = "your_gemini_api_key"
+
+# Application Configuration
+NODE_ENV = "production"
 
 [[kv_namespaces]]
 binding = "NAMESPACE"
@@ -219,7 +520,46 @@ binding = "BUCKET"
 bucket_name = "your_bucket_name"
 ```
 
-Note: The `CHUTES_API_TOKEN` is required to use the cooking video recipe extraction feature. Obtain this token from your Chutes AI account.
+### Advanced wrangler.toml Configuration
+
+For production deployments, consider these additional configurations:
+
+```toml
+# Production-specific configuration
+[env.production]
+vars = { NODE_ENV = "production" }
+
+# Development-specific configuration
+[env.development]
+vars = { NODE_ENV = "development" }
+
+# Observability and logging
+[observability.logs]
+enabled = true
+
+# Build configuration
+[build]
+command = "" # No custom build command needed if just using esbuild defaults
+```
+
+### Package Dependencies
+
+Key dependencies from package.json:
+- **Hono**: Fast web framework for Cloudflare Workers
+- **Vitest**: Testing framework with Cloudflare Workers support
+- **ESLint & Prettier**: Code quality and formatting tools
+- **Cloudflare Workers Types**: TypeScript definitions for Workers
+- **Telegram API Types**: Type definitions for Telegram Bot API
+
+### Error Handling Strategy
+
+The bot implements comprehensive error handling:
+
+- **Automatic Retries**: Failed requests are retried with exponential backoff
+- **Graceful Degradation**: Fallback to Telegraph when PDF generation fails
+- **Informative Messages**: Clear error messages for users
+- **Debug Logging**: Detailed logging for troubleshooting
+- **KV-based Tracking**: Persistent status tracking for long-running operations
 
 ## Development
 
@@ -229,6 +569,7 @@ Note: The `CHUTES_API_TOKEN` is required to use the cooking video recipe extract
 - Wrangler CLI (`npm install -g wrangler`)
 - Telegram Bot token from [@BotFather](https://t.me/BotFather)
 - Cloudflare account with Workers, KV, and R2 enabled
+- Chutes AI API token for video analysis
 
 ### Local Development Setup
 
@@ -500,80 +841,6 @@ beforeEach(() => {
 ```
 
 **3. Missing Error Scenario Testing**
-
-## PR-Agent Integration with Chutes AI
-
-This repository includes automated code review capabilities using PR-Agent (Qodo) integrated with Chutes AI as the OpenAI-compatible endpoint.
-
-### Features
-
-- 🤖 **Automated Code Reviews**: AI-powered analysis of pull requests
-- 📝 **PR Description Generation**: Automatic generation of comprehensive PR descriptions
-- 🔍 **Code Quality Analysis**: TypeScript and Cloudflare Workers specific feedback
-- 🚀 **Performance Optimization**: Suggestions for improving code performance
-- 🛡️ **Security Analysis**: Automated security vulnerability detection
-- 📊 **Test Coverage Analysis**: Feedback on test coverage and quality
-
-### Quick Setup
-
-Get started in 5 minutes with our automated setup:
-
-```bash
-# Install dependencies
-yarn install
-
-# Run the automated setup script
-yarn pr-agent:setup
-
-# Test the integration
-yarn pr-agent:test
-```
-
-For detailed setup instructions, see [SETUP_CHUTES_AI.md](SETUP_CHUTES_AI.md).
-
-### How It Works
-
-1. **On Pull Request Creation**: The GitHub Actions workflow automatically triggers
-2. **Code Analysis**: PR-Agent analyzes the code changes using Chutes AI
-3. **Review Comments**: AI-generated comments are posted on the pull request
-4. **PR Description**: Optional automatic generation of PR descriptions
-
-### Configuration
-
-The integration is configured through:
-- [`.github/workflows/pr-agent.yml`](.github/workflows/pr-agent.yml) - GitHub Actions workflow
-- [`.pr_agent.toml`](.pr_agent.toml) - PR-Agent configuration
-- Environment variables and GitHub secrets
-
-### Testing the Integration
-
-1. Create a new branch: `git checkout -b test-pr-agent`
-2. Make a small change to any TypeScript file
-3. Commit and push your changes
-4. Create a pull request using the [PR template](.github/pull_request_template.md)
-5. Check the Actions tab for workflow execution
-6. Review AI-generated comments on your PR
-
-### Troubleshooting
-
-If you encounter issues with the PR-Agent integration:
-
-1. Check the [troubleshooting guide](.github/ISSUE_TEMPLATE/pr_agent_integration_issue.md)
-2. Run the test script: `yarn pr-agent:test`
-3. Verify GitHub secrets are correctly set
-4. Check the workflow logs in the Actions tab
-
-### Advanced Configuration
-
-For advanced users, you can customize:
-- AI model parameters in [`.pr_agent.toml`](.pr_agent.toml)
-- Review criteria and focus areas
-- Workflow triggers and conditions
-- Notification preferences
-
-See the [full documentation](PR_AGENT_CHUTES_AI_SETUP.md) for more details.
-
-**3. Missing Error Scenario Testing**
 ```typescript
 // ❌ Only testing happy path
 it("should return recipe", async () => {
@@ -659,7 +926,28 @@ it("should store in R2 bucket", () => {
 - [Cloudflare Workers Testing Guide](https://developers.cloudflare.com/workers/wrangler/testing/)
 - [Test Coverage Best Practices](https://kentcdodds.com/blog/how-to-know-what-to-test)
 
-### Deployment
+## Documentation Links
+
+The project includes comprehensive documentation:
+
+### Core Documentation
+- [AGENTS.md](AGENTS.md) - Agent guidelines and instructions
+- [CLAUDE.md](CLAUDE.md) - Claude AI integration details
+- [SETUP_CHUTES_AI.md](SETUP_CHUTES_AI.md) - Chutes AI setup guide
+- [PR_AGENT_CHUTES_AI_SETUP.md](PR_AGENT_CHUTES_AI_SETUP.md) - PR-Agent integration setup
+- [RECIPE_COMMAND_README.md](RECIPE_COMMAND_README.md) - Recipe command documentation
+
+### GitHub Integration
+- [`.github/workflows/pr-agent.yml`](.github/workflows/pr-agent.yml) - PR-Agent GitHub Actions workflow
+- [`.github/pull_request_template.md`](.github/pull_request_template.md) - Pull request template
+- [`.github/ISSUE_TEMPLATE/pr_agent_integration_issue.md`](.github/ISSUE_TEMPLATE/pr_agent_integration_issue.md) - PR-Agent issue template
+
+### Configuration Files
+- [`.pr_agent.toml`](.pr_agent.toml) - PR-Agent configuration
+- [`wrangler.toml`](wrangler.toml) - Cloudflare Workers configuration
+- [`package.json`](package.json) - Project dependencies and scripts
+
+## Deployment
 
 1. Login to Cloudflare:
    ```bash
@@ -676,6 +964,15 @@ it("should store in R2 bucket", () => {
    Visit: https://your-worker-url/registerWebhook
    ```
 
+4. Set up environment variables:
+   ```bash
+   wrangler secret put ENV_BOT_TOKEN
+   wrangler secret put ENV_BOT_SECRET
+   wrangler secret put WEBHOOK_SECRET
+   wrangler secret put CHUTES_API_TOKEN
+   wrangler secret put GEMINI_API_KEY
+   ```
+
 ## Error Handling
 
 The bot includes comprehensive error handling:
@@ -684,6 +981,9 @@ The bot includes comprehensive error handling:
 - Informative error messages for users
 - Debug logging for troubleshooting
 - KV-based status tracking
+- Webhook retry mechanisms
+- Dead letter queue for failed deliveries
+- Graceful degradation when services are unavailable
 
 ## Current Features & Implementation
 
@@ -706,7 +1006,15 @@ Core Features:
 - 🍳 AI-powered cooking video recipe extraction
 - 📱 Advanced visual analysis with Kimi-VL-A3B-Thinking model
 - 🤖 Intelligent recipe parsing and formatted presentation
+- 🎬 Asynchronous video processing with job tracking
+- 📊 Webhook-based job completion notifications
+- 🔄 Advanced webhook management system
+- 📨 Dead letter queue for failed webhook deliveries
+- 🔍 Webhook status monitoring and manual retry capabilities
+- 📈 Gemini API usage statistics tracking
+- 🤖 Automated code reviews with PR-Agent and Chutes AI
+- 🔒 Security features with webhook authentication
 
 ## License
 
-MIT License - See LICENSE file for details 
+MIT License - See LICENSE file for details
