@@ -1,0 +1,89 @@
+# PR-Agent Configuration for Chutes AI with GLM-4.5-FP8
+# This file configures PR-Agent to use Chutes AI with zai-org/GLM-4.5-FP8 model
+
+# Chutes AI endpoint configuration
+[openai]
+api_key = "env:CHUTES_AI_API_KEY"
+base_url = "env:CHUTES_AI_BASE_URL"
+model = "env:CHUTES_AI_MODEL"
+
+# PR Reviewer configuration - optimized for GLM-4.5-FP8
+[pr_reviewer]
+enabled = true
+code_suggestions = true
+comments = true
+require_tests_review = false
+num_code_suggestions = 10  # GLM-4.5-FP8 excels at reasoning and coding tasks
+inline_code_comments = true
+# GLM-4.5-FP8 specific settings
+temperature = 0.1  # Lower temperature for more consistent code review
+max_tokens = 8000  # Leverage large context window (128K)
+context_length = 128000  # Set to full context window size
+
+# PR Description configuration
+[pr_description]
+enabled = true
+auto_generate = true
+publish_description = true
+# GLM-4.5-FP8 specific settings
+temperature = 0.2  # Slightly higher for more creative descriptions
+max_tokens = 4000  # Increased for comprehensive descriptions
+context_length = 128000  # Set to full context window size
+
+# Improve configuration
+[improve]
+enabled = true
+auto_improve = true
+suggest_improvements = true
+# GLM-4.5-FP8 specific settings
+temperature = 0.2
+max_tokens = 6000  # Increased for detailed improvement suggestions
+context_length = 128000  # Set to full context window size
+
+# General settings - optimized for GLM-4.5-FP8
+[general]
+verbose = true
+stream = true  # Enable streaming for faster feedback
+top_p = 0.9
+frequency_penalty = 0.0
+presence_penalty = 0.0
+# GLM-4.5-FP8 specific optimizations
+model_type = "reasoning"  # GLM-4.5 excels at reasoning tasks
+max_batch_size = 8  # Recommended batch size for GLM-4.5
+
+# TypeScript-specific settings - enhanced for GLM-4.5-FP8
+[typescript]
+enabled = true
+type_aware_review = true
+check_type_consistency = true
+suggest_better_types = true
+# Leverage GLM-4.5's coding capabilities
+analyze_complex_types = true
+suggest_generics = true
+review_async_patterns = true
+
+# Cloudflare Workers specific settings - enhanced for GLM-4.5-FP8
+[cloudflare_workers]
+enabled = true
+check_worker_bindings = true
+suggest_optimizations = true
+review_environment_variables = true
+# Leverage GLM-4.5's agentic capabilities
+analyze_durable_objects = true
+suggest_caching_strategies = true
+review_cron_triggers = true
+
+# Error handling and retry configuration - optimized for GLM-4.5-FP8
+[retry]
+max_retries = 3
+retry_delay = 1  # seconds
+retry_on_timeout = true
+retry_on_error = true
+backoff_factor = 2  # Exponential backoff
+
+# Performance optimization - tuned for GLM-4.5-FP8
+[performance]
+parallel_requests = true
+batch_size = 8  # Optimized for GLM-4.5's recommended batch size
+timeout = 45  # Increased timeout for complex reasoning tasks
+memory_efficient = true  # FP8 quantization is memory efficient

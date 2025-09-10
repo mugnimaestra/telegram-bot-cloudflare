@@ -1,0 +1,77 @@
+name: PR Agent with Chutes AI
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: PR Agent action step
+        id: pragent
+        uses: docker://codiumai/pr-agent@sha256:14165e525678ace7d9b51cda8652c2d74abb4e1d76b57c4a6ccaeba84663cc64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.CHUTES_AI_BASE_URL }}
+          PR_AGENT_COMMAND: review
+          PR_MODEL: ${{ secrets.CHUTES_AI_MODEL }}
+          # Chutes AI specific settings
+          PR_MODEL_TEMPERATURE: 0.1
+          PR_MODEL_MAX_TOKENS: 4000
+          PR_MODEL_TOP_P: 0.9
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          repo_full_name: ${{ github.repository }}
+          
+      - name: Log PR Agent output
+        if: always()
+        run: |
+          echo "PR Agent output:"
+          echo "${{ steps.pragent.outputs.result }}"
+          
+      - name: Handle Chutes AI Errors
+        if: failure()
+        run: |
+          echo "Chutes AI API error detected"
+          echo "Check your API key and endpoint configuration"
+          echo "Chutes AI endpoint: ${{ env.CHUTES_AI_BASE_URL }}"
+          echo "Please verify:"
+          echo "1. Your Chutes AI deployment is running"
+          echo "2. API key is valid and has sufficient permissions"
+          echo "3. Model is properly deployed and accessible"
+
+  pr-description:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Generate PR Description
+        id: prdesc
+        uses: docker://codiumai/pr-agent@sha256:14165e525678ace7d9b51cda8652c2d74abb4e1d76b57c4a6ccaeba84663cc64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.CHUTES_AI_BASE_URL }}
+          PR_AGENT_COMMAND: describe
+          PR_MODEL: ${{ secrets.CHUTES_AI_MODEL }}
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          repo_full_name: ${{ github.repository }}
+          
+      - name: Log Description Output
+        if: always()
+        run: |
+          echo "PR Description output:"
+          echo "${{ steps.prdesc.outputs.result }}"
