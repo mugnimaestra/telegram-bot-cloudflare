@@ -841,6 +841,80 @@ beforeEach(() => {
 ```
 
 **3. Missing Error Scenario Testing**
+
+## PR-Agent Integration with Chutes AI
+
+This repository includes automated code review capabilities using PR-Agent (Qodo) integrated with Chutes AI as the OpenAI-compatible endpoint.
+
+### Features
+
+- 🤖 **Automated Code Reviews**: AI-powered analysis of pull requests
+- 📝 **PR Description Generation**: Automatic generation of comprehensive PR descriptions
+- 🔍 **Code Quality Analysis**: TypeScript and Cloudflare Workers specific feedback
+- 🚀 **Performance Optimization**: Suggestions for improving code performance
+- 🛡️ **Security Analysis**: Automated security vulnerability detection
+- 📊 **Test Coverage Analysis**: Feedback on test coverage and quality
+
+### Quick Setup
+
+Get started in 5 minutes with our automated setup:
+
+```bash
+# Install dependencies
+yarn install
+
+# Run the automated setup script
+yarn pr-agent:setup
+
+# Test the integration
+yarn pr-agent:test
+```
+
+For detailed setup instructions, see [SETUP_CHUTES_AI.md](SETUP_CHUTES_AI.md).
+
+### How It Works
+
+1. **On Pull Request Creation**: The GitHub Actions workflow automatically triggers
+2. **Code Analysis**: PR-Agent analyzes the code changes using Chutes AI
+3. **Review Comments**: AI-generated comments are posted on the pull request
+4. **PR Description**: Optional automatic generation of PR descriptions
+
+### Configuration
+
+The integration is configured through:
+- [`.github/workflows/pr-agent.yml`](.github/workflows/pr-agent.yml) - GitHub Actions workflow
+- [`.pr_agent.toml`](.pr_agent.toml) - PR-Agent configuration
+- Environment variables and GitHub secrets
+
+### Testing the Integration
+
+1. Create a new branch: `git checkout -b test-pr-agent`
+2. Make a small change to any TypeScript file
+3. Commit and push your changes
+4. Create a pull request using the [PR template](.github/pull_request_template.md)
+5. Check the Actions tab for workflow execution
+6. Review AI-generated comments on your PR
+
+### Troubleshooting
+
+If you encounter issues with the PR-Agent integration:
+
+1. Check the [troubleshooting guide](.github/ISSUE_TEMPLATE/pr_agent_integration_issue.md)
+2. Run the test script: `yarn pr-agent:test`
+3. Verify GitHub secrets are correctly set
+4. Check the workflow logs in the Actions tab
+
+### Advanced Configuration
+
+For advanced users, you can customize:
+- AI model parameters in [`.pr_agent.toml`](.pr_agent.toml)
+- Review criteria and focus areas
+- Workflow triggers and conditions
+- Notification preferences
+
+See the [full documentation](PR_AGENT_CHUTES_AI_SETUP.md) for more details.
+
+**3. Missing Error Scenario Testing**
 ```typescript
 // ❌ Only testing happy path
 it("should return recipe", async () => {
