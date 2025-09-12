@@ -18,25 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Test Connection to Chutes AI
-        run: |
-          echo "Checking if secrets are set..."
-          if [ -z "${{ secrets.CHUTES_AI_BASE_URL }}" ]; then echo "CHUTES_AI_BASE_URL is empty or not set"; exit 1; fi
-          if [ -z "${{ secrets.CHUTES_AI_API_KEY }}" ]; then echo "CHUTES_AI_API_KEY is empty or not set"; exit 1; fi
-          if [ -z "${{ secrets.CHUTES_AI_MODEL }}" ]; then echo "CHUTES_AI_MODEL is empty or not set"; exit 1; fi
-          echo "All required secrets appear to be set. Pinging the Chutes AI endpoint..."
-          echo "Base URL length: ${#CHUTES_AI_BASE_URL}"
-          echo "API Key length: ${#CHUTES_AI_API_KEY}"
-          echo "Model length: ${#CHUTES_AI_MODEL}"
-          curl -v -X POST \
-            ${{ secrets.CHUTES_AI_BASE_URL }}/v1/chat/completions \
-            -H "Authorization: Bearer ${{ secrets.CHUTES_AI_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "model": "${{ secrets.CHUTES_AI_MODEL }}",
-              "messages": [{"role": "user", "content": "hello"}]
-            }' --fail
-
       - name: PR Agent action step
         id: pragent
         uses: Codium-ai/pr-agent@main
@@ -45,9 +26,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # Your Chutes AI configuration
-          OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}/v1
-          OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-          CONFIG__MODEL: ${{ secrets.CHUTES_AI_MODEL }}
+          OPENAI.API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}
+          OPENAI.KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          config.model: ${{ secrets.CHUTES_AI_MODEL }}
+          config.fallback_models: '["moonshotai/Kimi-K2-Instruct-0905"]'
           
           # For custom models, you must specify the maximum token limit
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
