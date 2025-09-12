@@ -26,10 +26,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # Your Chutes AI configuration (hardcoded)
-          OPENAI.API_BASE: "https://llm.chutes.ai/v1"
-          OPENAI.KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-          config.model: "custom/zai-org/GLM-4.5-FP8"
-          config.fallback_models: '["custom/moonshotai/Kimi-K2-Instruct-0905"]'
+          OPENAI__API_BASE: "https://llm.chutes.ai/v1"
+          OPENAI__KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          CONFIG__MODEL: "custom/zai-org/GLM-4.5-FP8"
+          CONFIG__FALLBACK_MODELS: '["custom/moonshotai/Kimi-K2-Instruct-0905"]'
           
           # For custom models, you must specify the maximum token limit
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
