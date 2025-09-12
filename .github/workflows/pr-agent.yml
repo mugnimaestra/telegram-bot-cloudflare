@@ -28,7 +28,7 @@ jobs:
           echo "API Key length: ${#CHUTES_AI_API_KEY}"
           echo "Model length: ${#CHUTES_AI_MODEL}"
           curl -v -X POST \
-            ${{ secrets.CHUTES_AI_BASE_URL }}/chat/completions \
+            ${{ secrets.CHUTES_AI_BASE_URL }}/v1/chat/completions \
             -H "Authorization: Bearer ${{ secrets.CHUTES_AI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d '{
