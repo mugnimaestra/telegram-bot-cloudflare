@@ -45,9 +45,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # Your Chutes AI configuration
-           OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}/v1
-           OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-           CONFIG__MODEL: ${{ secrets.CHUTES_AI_MODEL }}
+          OPENAI__API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}/v1
+          OPENAI_KEY: ${{ secrets.CHUTES_AI_API_KEY }}
+          CONFIG__MODEL: ${{ secrets.CHUTES_AI_MODEL }}
           
           # For custom models, you must specify the maximum token limit
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
