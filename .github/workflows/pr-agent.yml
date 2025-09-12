@@ -49,6 +49,12 @@ jobs:
           CONFIG__MODEL: "openai/zai-org/GLM-4.5-FP8"
           CONFIG__FALLBACK_MODELS: '["openai/moonshotai/Kimi-K2-Instruct-0905"]'
           
+          # Timeout configuration to fix LiteLLM aiohttp connection errors
+          REQUEST_TIMEOUT: "60"                    # Global timeout for all requests
+          OPENAI_TIMEOUT: "60"                     # OpenAI client specific timeout
+          OPENAI_MAX_RETRIES: "3"                  # Max retries for failed requests
+          USE_AIOHTTP_TRANSPORT: "True"            # Enable improved aiohttp transport
+          
           # For custom models, you must specify the maximum token limit
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
           
