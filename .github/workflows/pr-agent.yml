@@ -25,11 +25,11 @@ jobs:
           # This is the standard GitHub token, required for the agent to interact with the PR
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # Your Chutes AI configuration
-          OPENAI.API_BASE: ${{ secrets.CHUTES_AI_BASE_URL }}
+          # Your Chutes AI configuration (hardcoded)
+          OPENAI.API_BASE: "https://llm.chutes.ai/v1"
           OPENAI.KEY: ${{ secrets.CHUTES_AI_API_KEY }}
-          config.model: ${{ secrets.CHUTES_AI_MODEL }}
-          config.fallback_models: '["moonshotai/Kimi-K2-Instruct-0905"]'
+          config.model: "custom/zai-org/GLM-4.5-FP8"
+          config.fallback_models: '["custom/moonshotai/Kimi-K2-Instruct-0905"]'
           
           # For custom models, you must specify the maximum token limit
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
