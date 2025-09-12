@@ -17,6 +17,24 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Test Chutes AI Connection
+        run: |
+          echo "Testing connectivity to Chutes AI..."
+          echo "1. Testing models endpoint..."
+          curl -f -s https://llm.chutes.ai/v1/models \
+            -H "Authorization: Bearer ${{ secrets.CHUTES_AI_API_KEY }}" \
+            || echo "❌ Models endpoint failed"
+          
+          echo "2. Testing completion endpoint..."
+          curl -X POST https://llm.chutes.ai/v1/chat/completions \
+            -H "Authorization: Bearer ${{ secrets.CHUTES_AI_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "zai-org/GLM-4.5-FP8",
+              "messages": [{"role": "user", "content": "test"}],
+              "max_tokens": 1
+            }' --fail -v
+
       - name: PR Agent action step
         id: pragent
         uses: qodo-ai/pr-agent@main
