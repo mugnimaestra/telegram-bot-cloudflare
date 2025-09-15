@@ -307,4 +307,152 @@ describe("callVideoAnalysisService", () => {
     
     expect(result.success).toBe(true);
   });
+
+  it("should handle request with caption", async () => {
+    const requestWithCaption: VideoAnalysisRequest = {
+      ...mockRequest,
+      caption: "This is a test caption for the video",
+    };
+
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === requestWithCaption.videoUrl &&
+               body.caption === requestWithCaption.caption &&
+               body.metadata &&
+               body.metadata.user_id === requestWithCaption.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
+      });
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithCaption);
+    
+    expect(result.success).toBe(true);
+    expect(mockedLogger.info).toHaveBeenCalledWith(
+      "Calling video analysis service",
+      expect.objectContaining({
+        hasCaption: true,
+        captionLength: requestWithCaption.caption?.length,
+      })
+    );
+  });
+
+  it("should handle request with empty caption", async () => {
+    const requestWithEmptyCaption: VideoAnalysisRequest = {
+      ...mockRequest,
+      caption: "",
+    };
+
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === requestWithEmptyCaption.videoUrl &&
+               body.caption === requestWithEmptyCaption.caption &&
+               body.metadata &&
+               body.metadata.user_id === requestWithEmptyCaption.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
+      });
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithEmptyCaption);
+    
+    expect(result.success).toBe(true);
+  });
+
+  it("should reject request with non-string caption", async () => {
+    const requestWithInvalidCaption: VideoAnalysisRequest = {
+      ...mockRequest,
+      caption: 123 as any, // Invalid type
+    };
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithInvalidCaption);
+    
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Caption must be a string");
+  });
+
+  it("should reject request with caption too long", async () => {
+    const requestWithLongCaption: VideoAnalysisRequest = {
+      ...mockRequest,
+      caption: "A".repeat(1025), // Exceeds 1024 character limit
+    };
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithLongCaption);
+    
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Caption must be 1024 characters or less");
+  });
+
+  it("should handle request with exactly 1024 character caption", async () => {
+    const requestWithMaxCaption: VideoAnalysisRequest = {
+      ...mockRequest,
+      caption: "A".repeat(1024), // Exactly at the limit
+    };
+
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === requestWithMaxCaption.videoUrl &&
+               body.caption === requestWithMaxCaption.caption &&
+               body.metadata &&
+               body.metadata.user_id === requestWithMaxCaption.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
+      });
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithMaxCaption);
+    
+    expect(result.success).toBe(true);
+  });
+
+  it("should handle request with caption and callback", async () => {
+    const requestWithCaptionAndCallback: VideoAnalysisRequest = {
+      ...mockRequest,
+      caption: "Test caption with callback",
+      botToken: "test-bot-token",
+      callbackUrl: "https://example.com/webhook",
+      messageId: 789,
+    };
+
+    const scope = nock(serviceUrl)
+      .post("/analyze", (body) => {
+        return body.video_url === requestWithCaptionAndCallback.videoUrl &&
+               body.caption === requestWithCaptionAndCallback.caption &&
+               body.bot_token === requestWithCaptionAndCallback.botToken &&
+               body.callback &&
+               body.callback.type === 'webhook' &&
+               body.callback.webhook_url === requestWithCaptionAndCallback.callbackUrl &&
+               body.callback.chat_id === requestWithCaptionAndCallback.chatId &&
+               body.callback.message_id === requestWithCaptionAndCallback.messageId &&
+               body.metadata &&
+               body.metadata.user_id === requestWithCaptionAndCallback.userId &&
+               typeof body.metadata.timestamp === 'number';
+      })
+      .matchHeader("content-type", "application/json")
+      .matchHeader("user-agent", "TelegramBot/1.0")
+      .reply(202, {
+        job_id: "test-job-123",
+        status: "processing",
+        message: "Job accepted for processing",
+      });
+
+    const result = await callVideoAnalysisService(serviceUrl, requestWithCaptionAndCallback);
+    
+    expect(result.success).toBe(true);
+  });
 });

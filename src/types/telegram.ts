@@ -13,6 +13,7 @@ export interface Message {
   chat: Chat;
   date: number;
   text?: string;
+  caption?: string;
   [key: string]: any;
 }
 

@@ -28,6 +28,7 @@ interface TelegramFileResponse {
 interface VideoAnalysisJobRequest {
   video_url: string;
   bot_token: string;
+  caption?: string;
   callback: {
     type: 'telegram';
     webhook_url: string;
@@ -164,12 +165,13 @@ export async function handleVideoAnalysisAsync(
     const jobRequest: VideoAnalysisJobRequest = {
       video_url: telegramFileUrl,
       bot_token: token, // Send bot token so Go service can download from Telegram
+      caption: message.caption, // Add caption from message
       callback: {
         type: 'telegram',
         webhook_url: webhookUrl,
         chat_id: chatId,
-        message_id: processingMsg.result && "message_id" in processingMsg.result 
-          ? processingMsg.result.message_id 
+        message_id: processingMsg.result && "message_id" in processingMsg.result
+          ? processingMsg.result.message_id
           : 0,
       },
       metadata: {
@@ -181,6 +183,8 @@ export async function handleVideoAnalysisAsync(
     logger.info("Creating video analysis job", {
       serviceUrl,
       chatId,
+      hasCaption: !!message.caption,
+      captionLength: message.caption?.length,
       hasWebhookUrl: !!webhookUrl,
     });
 
@@ -284,6 +288,7 @@ export async function handleVideoAnalysisAsync(
     logger.error("Async video analysis handler encountered an error", {
       error: (error instanceof Error ? error.message : String(error)).substring(0, 300),
       chatId,
+      hasCaption: !!message.caption,
     });
 
     const errorMessage =

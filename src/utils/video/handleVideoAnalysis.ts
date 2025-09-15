@@ -228,6 +228,7 @@ export async function handleVideoAnalysis(
         botToken: token,
         callbackUrl: callbackUrl,
         messageId: messageId,
+        caption: message.caption,
       });
 
       // With async callback processing, the service should return job acceptance

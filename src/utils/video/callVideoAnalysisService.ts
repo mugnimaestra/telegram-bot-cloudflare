@@ -13,6 +13,7 @@ export interface VideoAnalysisRequest {
   botToken?: string;
   callbackUrl?: string;
   messageId?: number;
+  caption?: string;
 }
 
 export interface VideoAnalysisResponse {
@@ -40,6 +41,23 @@ export async function callVideoAnalysisService(
   request: VideoAnalysisRequest,
 ): Promise<VideoAnalysisResponse> {
   try {
+    // Validate caption if present
+    if (request.caption !== undefined) {
+      if (typeof request.caption !== 'string') {
+        return {
+          success: false,
+          error: "Caption must be a string",
+        };
+      }
+      
+      if (request.caption.length > 1024) {
+        return {
+          success: false,
+          error: "Caption must be 1024 characters or less",
+        };
+      }
+    }
+
     logger.info("Calling video analysis service", {
       serviceUrl,
       videoUrl: request.videoUrl,
@@ -47,12 +65,15 @@ export async function callVideoAnalysisService(
       chatId: request.chatId,
       hasBotToken: !!request.botToken,
       callbackUrl: request.callbackUrl,
+      hasCaption: !!request.caption,
+      captionLength: request.caption?.length,
     });
 
     // Prepare the request payload with callback structure for async processing
     const payload = {
       video_url: request.videoUrl,
       bot_token: request.botToken,
+      caption: request.caption,
       callback: request.callbackUrl ? {
         type: 'webhook' as const,
         webhook_url: request.callbackUrl,
