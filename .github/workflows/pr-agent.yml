@@ -34,8 +34,8 @@ jobs:
           OPENAI__KEY: ${{ secrets.CHUTES_AI_API_KEY }} # Keep for redundancy
           
           # --- Model Configuration ---
-          CONFIG__MODEL: "openai/zai-org/GLM-4.5-FP8"
-          CONFIG__FALLBACK_MODELS: '["openai/moonshotai/Kimi-K2-Instruct-0905"]'
+          CONFIG__MODEL: "openai/deepseek-ai/DeepSeek-R1-0528"
+          CONFIG__FALLBACK_MODELS: '["openai/Qwen/Qwen3-235B-A22B-Thinking-2507"]'
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: 128000
           
           # --- Connection & Timeout Fixes ---
