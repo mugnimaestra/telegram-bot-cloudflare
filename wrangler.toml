@@ -1,6 +1,6 @@
 name = "telegram-bot-cloudflare"
 main = "src/bot/index.ts"
-compatibility_date = "2023-12-18"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 
@@ -11,6 +11,26 @@ R2_PUBLIC_URL = "https://pub-0a13ff58e0fb441aafab98f56637c326.r2.dev"
 NH_API_URL = "https://nhapiod-proxy.onrender.com"
 VIDEO_ANALYSIS_SERVICE_URL = "https://api-video-analyzer.mugnimaestra.dev"
 NODE_ENV = "production"
+
+# Userbot Configuration Variables
+# IMPORTANT: These secrets should be set using Wrangler CLI, NOT in this file!
+# Run: node scripts/setup-userbot-secrets.js
+#
+# To obtain API credentials:
+# 1. Visit https://my.telegram.org
+# 2. Login with your phone number
+# 3. Go to "API development tools"
+# 4. Create a new application to get API_ID and API_HASH
+#
+# Required secrets (set via wrangler secret put):
+# - TELEGRAM_API_ID: Your Telegram API ID (number)
+# - TELEGRAM_API_HASH: Your Telegram API hash (string)
+# - USERBOT_ENABLED: Boolean flag to enable/disable userbot ("true" or "false")
+# - USERBOT_AUTH_MODE: Authentication mode ("bot" or "user")
+#
+# Mode-specific secrets:
+# Bot mode: TELEGRAM_BOT_TOKEN (from @BotFather)
+# User mode: TELEGRAM_PHONE_NUMBER, TELEGRAM_PASSWORD (optional for 2FA)
 
 [observability.logs]
 enabled = true

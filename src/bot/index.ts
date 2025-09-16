@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Update, Message, TelegramResponse, User } from "@/types/telegram";
 import type { Env } from "@/types/env";
-import type { R2Bucket } from "@cloudflare/workers-types";
 import { handleNHCommand } from "@/utils/nh/handleNHCommand";
 import { handleCallbackQuery } from "@/utils/nh/handleCallbackQuery";
 import { sendPlainText } from "@/utils/telegram/sendPlainText";
@@ -41,22 +40,58 @@ import {
   handleWebhookCallbackQuery,
   sendWebhookStatusWithActions
 } from "@/utils/video/handleWebhookCommands";
+// Userbot imports
+import { UserbotClient } from "@/userbot/client";
+import { UserbotAuth } from "@/userbot/auth";
+import { UserbotHandlers } from "@/userbot/handlers";
+import type { UserbotConfig, UserbotContext } from "@/userbot/types";
 
 const WEBHOOK = "/endpoint";
 const STATUS_CHECK_LIMIT = 10; // Maximum number of status checks
 const GEMINI_TIER_1_DAILY_LIMIT = 1000; // 1000 requests per day for Tier 1
 
+/**
+ * Usage data structure for tracking Gemini API usage statistics
+ * Stored in KV namespace for persistence across worker instances
+ */
 interface UsageData {
+  /** Number of API requests made today */
   count: number;
+  /** Date string in ISO format for tracking daily usage */
   date: string;
+  /** Unix timestamp when the daily limit resets (midnight UTC) */
   resetTime: number;
 }
 
+/**
+ * Context variables interface for the Hono application
+ * Contains both bot and userbot related state that needs to be shared across middleware and handlers
+ */
 type Variables = {
+  /** Base URL for the application, used for webhook construction */
   baseUrl: string;
+  /** Userbot client instance for Telegram user bot operations
+   * Only available when USERBOT_ENABLED is set to "true" and initialization succeeds
+   */
+  userbotClient?: UserbotClient;
+  /** Userbot handlers for managing message and command handlers
+   * Provides event handling capabilities for the userbot
+   * Only available when userbot initialization succeeds
+   */
+  userbotHandlers?: UserbotHandlers;
+  /** Userbot context containing session and configuration information
+   * Contains authentication state, configuration, and metadata for the userbot
+   * Only available when userbot initialization succeeds
+   */
+  userbotContext?: UserbotContext;
 };
 
-// Convert TelegramResponse to Message | boolean
+/**
+ * Convert Telegram API response to a standardized format
+ * @param response - The raw response from Telegram API
+ * @returns Promise resolving to a Message object if successful, false if failed
+ * @throws Error if response format is invalid
+ */
 async function convertResponse(
   response: TelegramResponse,
 ): Promise<Message | boolean> {
@@ -65,7 +100,12 @@ async function convertResponse(
   return response.result as Message;
 }
 
-// Get Gemini API usage information
+/**
+ * Get Gemini API usage information from KV storage
+ * @param namespace - KV namespace for storing usage data (optional)
+ * @returns Formatted string with usage statistics and status information
+ * @throws Error if KV storage access fails
+ */
 async function getGeminiUsageInfo(namespace?: any): Promise<string> {
   if (!namespace) {
     return "⚠️ Usage tracking unavailable - KV namespace not configured";
@@ -129,8 +169,47 @@ Try again in a few minutes, or contact support if the issue persists.`;
   }
 }
 
-function getHelpMessage(firstName?: string): string {
+/**
+ * Generate help message with available commands and bot information
+ * @param firstName - Optional user first name for personalized greeting
+ * @returns Formatted help message string with Markdown V2 formatting
+ */
+function getHelpMessage(firstName?: string, userbotEnabled?: boolean): string {
   const greeting = firstName ? `Hello ${escapeMarkdown(firstName)}\\! ` : "";
+  const userbotSection = userbotEnabled ? `
+
+🤖 *Userbot Commands:*
+\`/userbot_start\` - Start the userbot client
+• Check if userbot is enabled in environment
+• Initialize and start the userbot client
+• Save session to KV storage
+• Send confirmation message to user
+
+\`/userbot_stop\` - Stop the userbot client
+• Disconnect the userbot client
+• Clear session from KV storage
+• Send confirmation message to user
+
+\`/userbot_status\` - Check userbot status
+• Check if userbot is enabled and connected
+• Display connection status, user info, and session details
+• Send status information to user
+
+\`/userbot_info\` - Get userbot user information
+• Get user information from the userbot client
+• Display user details like username, phone number, etc.
+• Send user information to user
+
+\`/userbot_send <peer> <message>\` - Send a message using the userbot
+• Validate parameters
+• Use the userbot client to send a message
+• Send confirmation with message ID to user
+
+\`/userbot_help\` - Display userbot help information
+• List all available userbot commands
+• Provide usage examples
+• Send help message to user` : "";
+
   return `${greeting}Welcome to UMP9 Bot 🤖
 
 *Available Commands:*
@@ -173,7 +252,7 @@ Example: \`/getpdf 546408\` or \`/getpdf https://nhentai\\.net/g/546408/\`
 \`/usage\` - Check Gemini API usage statistics
 • View daily request count and limits
 • See remaining requests for today
-• Monitor reset times and status
+• Monitor reset times and status${userbotSection}
 
 *Features:*
 • Automatic PDF generation with status tracking
@@ -185,14 +264,14 @@ Example: \`/getpdf 546408\` or \`/getpdf https://nhentai\\.net/g/546408/\`
 • AI\\-powered cooking video analysis
 • Enhanced webhook delivery tracking
 • Automatic retry with exponential backoff
-• Manual webhook retry capabilities
+• Manual webhook retry capabilities${userbotEnabled ? '\n• Userbot functionality with Telegram client integration' : ''}
 
 *Limits:*
 • PDF status checks: ${STATUS_CHECK_LIMIT} times per gallery
 • Gemini API: ${GEMINI_TIER_1_DAILY_LIMIT} requests per day (resets at midnight UTC)
 • Video size: Determined by video analyzer service
 • Webhook retries: 3 attempts maximum (configurable)
-• Webhook status storage: 7 days
+• Webhook status storage: 7 days${userbotEnabled ? '\n• Userbot session: 30 days (configurable)' : ''}
 
 Bot Version: 1\\.3\\.0`;
 }
@@ -214,6 +293,245 @@ app.use("*", async (c, next) => {
 // Store the base URL in context
 app.use("*", async (c, next) => {
   c.set("baseUrl", `https://${c.req.header("host")}`);
+  await next();
+});
+
+/**
+ * Middleware to initialize the userbot if enabled
+ * Handles session management, authentication, and handler registration
+ * Provides comprehensive error handling and logging
+ */
+app.use("*", async (c, next) => {
+  try {
+    // Check if userbot is enabled
+    if (c.env.USERBOT_ENABLED === "true") {
+      logger.info("[Userbot] Initializing userbot...");
+      
+      // Validate required environment variables
+      const apiId = parseInt(c.env.USERBOT_API_ID || "");
+      const apiHash = c.env.USERBOT_API_HASH || "";
+      const authMode = (c.env.USERBOT_AUTH_MODE || 'bot') as 'bot' | 'user';
+      const botToken = c.env.USERBOT_BOT_TOKEN || "";
+      const phoneNumber = c.env.TELEGRAM_PHONE_NUMBER || "";
+      
+      // Common validation for both modes
+      if (!apiId || isNaN(apiId) || !apiHash) {
+        logger.error("[Userbot] Missing or invalid common required environment variables", {
+          hasApiId: !!apiId && !isNaN(apiId),
+          hasApiHash: !!apiHash,
+          apiId: apiId,
+          apiHashLength: apiHash?.length
+        });
+        await next();
+        return;
+      }
+      
+      // Mode-specific validation
+      if (authMode === 'bot' && !botToken) {
+        logger.error("[Userbot] Missing bot token for bot mode", {
+          authMode,
+          hasBotToken: !!botToken
+        });
+        await next();
+        return;
+      }
+      
+      if (authMode === 'user' && !phoneNumber) {
+        logger.error("[Userbot] Missing phone number for user mode", {
+          authMode,
+          hasPhoneNumber: !!phoneNumber
+        });
+        await next();
+        return;
+      }
+      
+      // Create userbot configuration based on auth mode
+      const userbotConfig: UserbotConfig = {
+        apiId,
+        apiHash,
+        authMode,
+        // Mode-specific configuration
+        ...(authMode === 'bot' ? { botToken } : {
+          phoneNumber: c.env.TELEGRAM_PHONE_NUMBER,
+          password: c.env.TELEGRAM_PASSWORD
+        })
+      };
+      
+      // Create userbot client with error handling
+      let userbotClient: UserbotClient;
+      try {
+        userbotClient = new UserbotClient(
+          apiId,
+          apiHash,
+          authMode === 'bot' ? botToken : undefined
+        );
+        logger.info("[Userbot] Userbot client created successfully", { authMode });
+      } catch (error) {
+        logger.error("[Userbot] Failed to create userbot client", {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          authMode
+        });
+        await next();
+        return;
+      }
+      
+      // Try to load existing session from KV with enhanced error handling
+      let sessionString: string | null = null;
+      try {
+        if (c.env.NAMESPACE) {
+          sessionString = await UserbotAuth.loadSession(c.env);
+          if (sessionString) {
+            logger.info("[Userbot] Loaded existing session from KV");
+            try {
+              userbotClient.loadSession(sessionString);
+              logger.info("[Userbot] Session loaded successfully");
+            } catch (loadError) {
+              logger.error("[Userbot] Failed to load session into client", {
+                error: loadError instanceof Error ? loadError.message : String(loadError)
+              });
+              sessionString = null; // Reset to force new session
+            }
+          }
+        } else {
+          logger.warn("[Userbot] KV namespace not available, session persistence disabled");
+        }
+      } catch (error) {
+        logger.error("[Userbot] Failed to load session from KV", {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
+      }
+      
+      // Start the userbot client with comprehensive error handling
+      let isClientStarted = false;
+      try {
+        if (authMode === 'bot') {
+          await userbotClient.start();
+        } else {
+          // User mode requires phone number and optional password
+          await userbotClient.start(
+            c.env.TELEGRAM_PHONE_NUMBER,
+            c.env.TELEGRAM_PASSWORD
+          );
+        }
+        isClientStarted = true;
+        logger.info("[Userbot] Userbot client started successfully", { authMode });
+        
+        // Save session if it's new or KV is available
+        if (!sessionString && c.env.NAMESPACE) {
+          try {
+            const newSessionString = userbotClient.getSessionString();
+            if (newSessionString) {
+              await UserbotAuth.saveSession(c.env, newSessionString);
+              logger.info("[Userbot] Saved new session to KV");
+            }
+          } catch (saveError) {
+            logger.error("[Userbot] Failed to save session to KV", {
+              error: saveError instanceof Error ? saveError.message : String(saveError)
+            });
+          }
+        }
+      } catch (error) {
+        logger.error("[Userbot] Failed to start userbot client", {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          isRecoverable: error instanceof Error && error.message.includes('Network')
+        });
+        
+        // Try to continue without userbot if authentication fails
+        if (error instanceof Error && error.message.includes('Authentication failed')) {
+          logger.warn("[Userbot] Authentication failed, continuing without userbot functionality");
+          await next();
+          return;
+        }
+      }
+      
+      // Only proceed with context and handlers if client is started
+      if (!isClientStarted) {
+        logger.warn("[Userbot] Client not started, skipping userbot initialization");
+        await next();
+        return;
+      }
+      
+      // Create userbot context with error handling
+      let userbotContext: UserbotContext;
+      try {
+        userbotContext = {
+          client: userbotClient.getClient(),
+          session: {
+            sessionString: userbotClient.getSessionString(),
+            createdAt: Date.now(),
+            isValid: true
+          },
+          config: userbotConfig,
+          metadata: {
+            eventName: 'userbot_init',
+            timestamp: Date.now()
+          }
+        };
+        logger.info("[Userbot] Userbot context created successfully");
+      } catch (error) {
+        logger.error("[Userbot] Failed to create userbot context", {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        await next();
+        return;
+      }
+      
+      // Create userbot handlers with error handling
+      let userbotHandlers: UserbotHandlers;
+      try {
+        userbotHandlers = new UserbotHandlers(userbotClient, userbotContext);
+        logger.info("[Userbot] Userbot handlers created successfully");
+      } catch (error) {
+        logger.error("[Userbot] Failed to create userbot handlers", {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        await next();
+        return;
+      }
+      
+      // Register default handlers with error handling
+      try {
+        await userbotHandlers.registerAllHandlers();
+        logger.info("[Userbot] Registered default handlers successfully");
+      } catch (error) {
+        logger.error("[Userbot] Failed to register handlers", {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        // Continue without handlers but still provide basic functionality
+      }
+      
+      // Store userbot instances in context
+      try {
+        c.set("userbotClient", userbotClient);
+        c.set("userbotHandlers", userbotHandlers);
+        c.set("userbotContext", userbotContext);
+        logger.info("[Userbot] Userbot instances stored in context successfully");
+      } catch (error) {
+        logger.error("[Userbot] Failed to store userbot instances in context", {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      
+      logger.info("[Userbot] Userbot initialization completed successfully");
+    } else {
+      logger.info("[Userbot] Userbot is disabled (USERBOT_ENABLED != 'true')");
+    }
+  } catch (error) {
+    // Catch-all error handler for unexpected errors
+    logger.error("[Userbot] Unexpected error during initialization", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      isCritical: true
+    });
+    
+    // Continue with the request even if userbot initialization fails
+    // This ensures the main bot functionality remains available
+  }
+  
   await next();
 });
 
@@ -1611,7 +1929,7 @@ app.post(WEBHOOK, async (c) => {
         await sendMarkdownV2Text(
           c.env.ENV_BOT_TOKEN,
           update.message.chat.id,
-          getHelpMessage(update.message.from?.first_name),
+          getHelpMessage(update.message.from?.first_name, c.env.USERBOT_ENABLED === "true"),
         );
         return new Response("OK", { status: 200 });
       } catch (error) {
@@ -1634,7 +1952,7 @@ app.post(WEBHOOK, async (c) => {
           await sendMarkdownV2Text(
             c.env.ENV_BOT_TOKEN,
             update.message.chat.id,
-            getHelpMessage(),
+            getHelpMessage(undefined, c.env.USERBOT_ENABLED === "true"),
           );
         } catch (error) {
           logger.error("[Webhook] Error sending group welcome message", {
@@ -1650,6 +1968,594 @@ app.post(WEBHOOK, async (c) => {
         }
       }
       return new Response("OK", { status: 200 });
+    } else if (update.message?.text?.startsWith("/userbot_start")) {
+      logger.info("[Webhook] Userbot start command received");
+      
+      try {
+        // Check if userbot is enabled
+        if (c.env.USERBOT_ENABLED !== "true") {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Userbot Disabled*\n\n" +
+              "Userbot functionality is not enabled\\.\n\n" +
+              "💡 *To enable userbot:*\n" +
+              "• Set USERBOT_ENABLED=true in environment variables\n" +
+              "• Configure required userbot credentials\n" +
+              "• Contact bot administrator for assistance",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Check if userbot is already initialized
+        const userbotClient = c.get("userbotClient");
+        const userbotContext = c.get("userbotContext");
+        
+        if (userbotClient && userbotClient.isConnected()) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "✅ *Userbot Already Started*\n\n" +
+              "The userbot client is already running and connected\\.\n\n" +
+              "💡 *Available commands:*\n" +
+              "• Check status: /userbot_status\n" +
+              "• View user info: /userbot_info\n" +
+              "• Send message: /userbot_send\n" +
+              "• Stop userbot: /userbot_stop",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Try to initialize userbot
+        const apiId = parseInt(c.env.USERBOT_API_ID || "");
+        const apiHash = c.env.USERBOT_API_HASH || "";
+        const botToken = c.env.USERBOT_BOT_TOKEN || "";
+        
+        if (!apiId || isNaN(apiId) || !apiHash || !botToken) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Configuration Error*\n\n" +
+              "Userbot configuration is incomplete\\.\n\n" +
+              "Required environment variables:\n" +
+              "• USERBOT_API_ID\n" +
+              "• USERBOT_API_HASH\n" +
+              "• USERBOT_BOT_TOKEN\n\n" +
+              "💡 *Please contact bot administrator to complete configuration*",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Create new userbot client
+        const newUserbotClient = new UserbotClient(apiId, apiHash, botToken);
+        
+        // Try to load existing session
+        let sessionString: string | null = null;
+        if (c.env.NAMESPACE) {
+          try {
+            sessionString = await UserbotAuth.loadSession(c.env);
+            if (sessionString) {
+              newUserbotClient.loadSession(sessionString);
+            }
+          } catch (error) {
+            logger.warn("[Userbot] Failed to load existing session", { error });
+          }
+        }
+
+        // Start the client
+        await newUserbotClient.start();
+        
+        // Save session if new
+        if (!sessionString && c.env.NAMESPACE) {
+          const newSessionString = newUserbotClient.getSessionString();
+          if (newSessionString) {
+            await UserbotAuth.saveSession(c.env, newSessionString);
+          }
+        }
+
+        // Create userbot context
+        const userbotConfig: UserbotConfig = {
+          apiId,
+          apiHash,
+          botToken,
+          authMode: 'bot'
+        };
+        
+        const newUserbotContext: UserbotContext = {
+          client: newUserbotClient.getClient(),
+          session: {
+            sessionString: newUserbotClient.getSessionString(),
+            createdAt: Date.now(),
+            isValid: true
+          },
+          config: userbotConfig,
+          metadata: {
+            eventName: 'userbot_manual_start',
+            timestamp: Date.now()
+          }
+        };
+
+        // Create handlers and register them
+        const userbotHandlers = new UserbotHandlers(newUserbotClient, newUserbotContext);
+        await userbotHandlers.registerAllHandlers();
+
+        // Update context
+        c.set("userbotClient", newUserbotClient);
+        c.set("userbotHandlers", userbotHandlers);
+        c.set("userbotContext", newUserbotContext);
+
+        // Get user info for confirmation
+        const userInfo = await newUserbotClient.getMe();
+        
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "✅ *Userbot Started Successfully*\n\n" +
+            `🤖 *User:* ${escapeMarkdown(userInfo.firstName || 'Unknown')} ${escapeMarkdown(userInfo.lastName || '')} (@${escapeMarkdown(userInfo.username || 'N/A')})\n` +
+            `🆔 *User ID:* ${userInfo.id}\n` +
+            `📱 *Phone:* ${userInfo.phone ? escapeMarkdown(userInfo.phone) : 'N/A'}\n` +
+            `🔗 *Status:* Connected\n\n` +
+            "💡 *Available commands:*\n" +
+            "• Check status: /userbot_status\n" +
+            "• View user info: /userbot_info\n" +
+            "• Send message: /userbot_send\n" +
+            "• Stop userbot: /userbot_stop\n" +
+            "• View help: /userbot_help",
+        );
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        logger.error("[Webhook] Error handling userbot start command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "❌ *Failed to Start Userbot*\n\n" +
+            "An error occurred while starting the userbot client\\.\n\n" +
+            `🔍 *Error:* ${escapeMarkdown(error instanceof Error ? error.message : String(error))}\n\n` +
+            "💡 *Troubleshooting:*\n" +
+            "• Check environment configuration\n" +
+            "• Verify API credentials\n" +
+            "• Try again in a few minutes\n" +
+            "• Contact administrator if issue persists",
+        );
+        return new Response("OK", { status: 200 });
+      }
+    } else if (update.message?.text?.startsWith("/userbot_stop")) {
+      logger.info("[Webhook] Userbot stop command received");
+      
+      try {
+        // Check if userbot is enabled
+        if (c.env.USERBOT_ENABLED !== "true") {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Userbot Disabled*\n\n" +
+              "Userbot functionality is not enabled\\.",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const userbotClient = c.get("userbotClient");
+        const userbotContext = c.get("userbotContext");
+
+        if (!userbotClient || !userbotClient.isConnected()) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "ℹ️ *Userbot Not Running*\n\n" +
+              "The userbot client is not currently running\\.\n\n" +
+              "💡 *To start userbot:*\n" +
+              "• Use /userbot_start command\n" +
+              "• Ensure userbot is enabled in configuration",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Disconnect the client
+        await userbotClient.disconnect();
+        
+        // Clear session from KV storage
+        if (c.env.NAMESPACE) {
+          try {
+            await UserbotAuth.clearSession(c.env);
+          } catch (error) {
+            logger.warn("[Userbot] Failed to clear session from KV", { error });
+          }
+        }
+
+        // Clear context
+        c.set("userbotClient", undefined);
+        c.set("userbotHandlers", undefined);
+        c.set("userbotContext", undefined);
+
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "✅ *Userbot Stopped Successfully*\n\n" +
+            "The userbot client has been disconnected\\.\n\n" +
+            "🗑️ *Session cleared* from storage\n\n" +
+            "💡 *To restart:*\n" +
+            "• Use /userbot_start command",
+        );
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        logger.error("[Webhook] Error handling userbot stop command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "❌ *Failed to Stop Userbot*\n\n" +
+            "An error occurred while stopping the userbot client\\.\n\n" +
+            `🔍 *Error:* ${escapeMarkdown(error instanceof Error ? error.message : String(error))}\n\n` +
+            "💡 *Try again or contact administrator if issue persists*",
+        );
+        return new Response("OK", { status: 200 });
+      }
+    } else if (update.message?.text?.startsWith("/userbot_status")) {
+      logger.info("[Webhook] Userbot status command received");
+      
+      try {
+        // Check if userbot is enabled
+        if (c.env.USERBOT_ENABLED !== "true") {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Userbot Disabled*\n\n" +
+              "Userbot functionality is not enabled\\.",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const userbotClient = c.get("userbotClient");
+        const userbotContext = c.get("userbotContext");
+
+        if (!userbotClient) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "ℹ️ *Userbot Not Initialized*\n\n" +
+              "The userbot client has not been initialized\\.\n\n" +
+              "💡 *To start userbot:*\n" +
+              "• Use /userbot_start command",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const isConnected = userbotClient.isConnected();
+        const hasValidSession = userbotContext?.session?.isValid || false;
+        const sessionAge = userbotContext?.session?.createdAt
+          ? Math.floor((Date.now() - userbotContext.session.createdAt) / 1000)
+          : 0;
+
+        let userInfo = null;
+        if (isConnected) {
+          try {
+            userInfo = await userbotClient.getMe();
+          } catch (error) {
+            logger.warn("[Userbot] Failed to get user info", { error });
+          }
+        }
+
+        const statusMessage = `📊 *Userbot Status*
+
+🔌 *Connection Status:* ${isConnected ? '✅ Connected' : '❌ Disconnected'}
+🆔 *Session Valid:* ${hasValidSession ? '✅ Yes' : '❌ No'}
+⏱️ *Session Age:* ${sessionAge}s
+
+${userInfo ? `
+👤 *User Information:*
+• *Name:* ${escapeMarkdown(userInfo.firstName || 'Unknown')} ${escapeMarkdown(userInfo.lastName || '')}
+• *Username:* @${escapeMarkdown(userInfo.username || 'N/A')}
+• *User ID:* ${userInfo.id}
+• *Phone:* ${userInfo.phone ? escapeMarkdown(userInfo.phone) : 'N/A'}
+• *Bot:* ${userInfo.bot ? 'Yes' : 'No'}
+` : '👤 *User Information:* Not available (disconnected)'}
+
+${userbotContext?.metadata ? `
+🔧 *System Information:*
+• *Last Event:* ${escapeMarkdown(userbotContext.metadata.eventName || 'N/A')}
+• *Timestamp:* ${new Date(userbotContext.metadata.timestamp).toLocaleString()}
+` : ''}
+
+💡 *Available Commands:*
+• Start userbot: /userbot_start
+• Stop userbot: /userbot_stop
+• View user info: /userbot_info
+• Send message: /userbot_send
+• View help: /userbot_help`;
+
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          statusMessage
+        );
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        logger.error("[Webhook] Error handling userbot status command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "❌ *Failed to Get Status*\n\n" +
+            "An error occurred while retrieving userbot status\\.\n\n" +
+            `🔍 *Error:* ${escapeMarkdown(error instanceof Error ? error.message : String(error))}`,
+        );
+        return new Response("OK", { status: 200 });
+      }
+    } else if (update.message?.text?.startsWith("/userbot_info")) {
+      logger.info("[Webhook] Userbot info command received");
+      
+      try {
+        // Check if userbot is enabled
+        if (c.env.USERBOT_ENABLED !== "true") {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Userbot Disabled*\n\n" +
+              "Userbot functionality is not enabled\\.",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const userbotClient = c.get("userbotClient");
+
+        if (!userbotClient || !userbotClient.isConnected()) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "ℹ️ *Userbot Not Connected*\n\n" +
+              "The userbot client is not currently connected\\.\n\n" +
+              "💡 *To start userbot:*\n" +
+              "• Use /userbot_start command",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Get user information
+        const userInfo = await userbotClient.getMe();
+
+        const infoMessage = `👤 *Userbot User Information*
+
+🆔 *Basic Information:*
+• *First Name:* ${escapeMarkdown(userInfo.firstName || 'N/A')}
+• *Last Name:* ${escapeMarkdown(userInfo.lastName || 'N/A')}
+• *Username:* @${escapeMarkdown(userInfo.username || 'N/A')}
+• *User ID:* ${userInfo.id}
+• *Bot Account:* ${userInfo.bot ? 'Yes' : 'No'}
+
+📱 *Contact Information:*
+• *Phone Number:* ${userInfo.phone ? escapeMarkdown(userInfo.phone) : 'Not set'}
+• *Verified:* ${userInfo.verified ? 'Yes' : 'No'}
+• *Restricted:* ${userInfo.restricted ? 'Yes' : 'No'}
+
+🌐 *Language Settings:*
+• *Language Code:* ${escapeMarkdown(userInfo.langCode || 'N/A')}
+
+📊 *Account Status:*
+• *Status:* ${userInfo.bot ? 'Bot Account' : 'User Account'}
+• *Connection:* ✅ Connected
+• *Session:* Active
+
+💡 *Available Commands:*
+• Check status: /userbot_status
+• Send message: /userbot_send
+• Stop userbot: /userbot_stop`;
+
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          infoMessage
+        );
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        logger.error("[Webhook] Error handling userbot info command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "❌ *Failed to Get User Info*\n\n" +
+            "An error occurred while retrieving userbot user information\\.\n\n" +
+            `🔍 *Error:* ${escapeMarkdown(error instanceof Error ? error.message : String(error))}`,
+        );
+        return new Response("OK", { status: 200 });
+      }
+    } else if (update.message?.text?.startsWith("/userbot_send")) {
+      logger.info("[Webhook] Userbot send command received");
+      
+      try {
+        // Check if userbot is enabled
+        if (c.env.USERBOT_ENABLED !== "true") {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Userbot Disabled*\n\n" +
+              "Userbot functionality is not enabled\\.",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const userbotClient = c.get("userbotClient");
+
+        if (!userbotClient || !userbotClient.isConnected()) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "ℹ️ *Userbot Not Connected*\n\n" +
+              "The userbot client is not currently connected\\.\n\n" +
+              "💡 *To start userbot:*\n" +
+              "• Use /userbot_start command",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Parse command: /userbot_send <peer> <message>
+        const commandParts = update.message.text.split(' ');
+        if (commandParts.length < 3) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Invalid Command Format*\n\n" +
+              "Please provide both peer and message\\.\n\n" +
+              "📝 *Usage:*\n" +
+              "`/userbot_send <peer> <message>`\n\n" +
+              "🔍 *Examples:*\n" +
+              "• Send to user ID: `/userbot_send 123456789 Hello there\\!`\n" +
+              "• Send to username: `/userbot_send username Hello there\\!`\n" +
+              "• Send to chat: `/userbot_send -100123456789 Hello group\\!`\n\n" +
+              "💡 *Tips:*\n" +
+              "• User IDs are numeric\\.\n" +
+              "• Usernames start with @\\.\n" +
+              "• Chat IDs are negative and usually start with -100",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const peer = commandParts[1];
+        const messageText = commandParts.slice(2).join(' ');
+
+        if (!peer || !messageText.trim()) {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Missing Parameters*\n\n" +
+              "Both peer and message are required\\.\n\n" +
+              "📝 *Usage:*\n" +
+              "`/userbot_send <peer> <message>`",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        // Parse peer (handle different formats)
+        let parsedPeer: number | string = peer;
+        if (peer.startsWith('@')) {
+          // Username format
+          parsedPeer = peer.substring(1);
+        } else if (peer.startsWith('-100')) {
+          // Supergroup/channel format
+          parsedPeer = parseInt(peer);
+        } else if (!isNaN(parseInt(peer))) {
+          // User ID format
+          parsedPeer = parseInt(peer);
+        }
+
+        // Send the message
+        const sentMessage = await userbotClient.sendMessage(parsedPeer, messageText);
+
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "✅ *Message Sent Successfully*\n\n" +
+            `📤 *To:* ${escapeMarkdown(peer)}\n` +
+            `💬 *Message:* ${escapeMarkdown(messageText)}\n` +
+            `🆔 *Message ID:* ${sentMessage.id}\n` +
+            `⏰ *Sent at:* ${new Date(sentMessage.date * 1000).toLocaleString()}\n\n` +
+            "💡 *The message has been delivered using the userbot client*",
+        );
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        logger.error("[Webhook] Error handling userbot send command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "❌ *Failed to Send Message*\n\n" +
+            "An error occurred while sending the message\\.\n\n" +
+            `🔍 *Error:* ${escapeMarkdown(error instanceof Error ? error.message : String(error))}\n\n` +
+            "💡 *Troubleshooting:*\n" +
+            "• Verify the peer ID/username is correct\n" +
+            "• Ensure the userbot has permission to message the target\n" +
+            "• Check if the target exists and is accessible\n" +
+            "• Try again in a few minutes",
+        );
+        return new Response("OK", { status: 200 });
+      }
+    } else if (update.message?.text?.startsWith("/userbot_help")) {
+      logger.info("[Webhook] Userbot help command received");
+      
+      try {
+        // Check if userbot is enabled
+        if (c.env.USERBOT_ENABLED !== "true") {
+          await sendMarkdownV2Text(
+            c.env.ENV_BOT_TOKEN,
+            update.message.chat.id,
+            "❌ *Userbot Disabled*\n\n" +
+              "Userbot functionality is not enabled\\.",
+          );
+          return new Response("OK", { status: 200 });
+        }
+
+        const userbotClient = c.get("userbotClient");
+        const isConnected = userbotClient?.isConnected() || false;
+
+        const helpMessage = `🤖 *Userbot Help*
+
+📚 *Available Commands:*
+
+🚀 *Start/Stop:*
+• \`/userbot_start\` - Start the userbot client
+• \`/userbot_stop\` - Stop the userbot client
+
+📊 *Information:*
+• \`/userbot_status\` - Check userbot connection status
+• \`/userbot_info\` - Get userbot user information
+
+💬 *Messaging:*
+• \`/userbot_send <peer> <message>\` - Send a message using the userbot
+
+❓ *Help:*
+• \`/userbot_help\` - Show this help message
+
+📝 *Usage Examples:*
+
+*Starting Userbot:*
+\`/userbot_start\`
+
+*Checking Status:*
+\`/userbot_status\`
+
+*Sending Messages:*
+• To user ID: \`/userbot_send 123456789 Hello there\\!\`
+• To username: \`/userbot_send @username Hello there\\!\`
+• To group: \`/userbot_send -100123456789 Hello group\\!\`
+
+*Getting User Info:*
+\`/userbot_info\`
+
+⚙️ *Current Status:*
+• Userbot Enabled: ✅ Yes
+• Userbot Connected: ${isConnected ? '✅ Yes' : '❌ No'}
+
+💡 *Tips:*
+• Userbot must be started before using other commands
+• Peer can be user ID, username, or chat ID
+• Usernames should include @ symbol
+• Group/chat IDs usually start with -100
+• Use /userbot_status to check connection
+
+🔧 *Requirements:*
+• USERBOT_ENABLED=true
+• USERBOT_API_ID
+• USERBOT_API_HASH
+• USERBOT_BOT_TOKEN`;
+
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          helpMessage
+        );
+
+        return new Response("OK", { status: 200 });
+      } catch (error) {
+        logger.error("[Webhook] Error handling userbot help command", { error });
+        await sendMarkdownV2Text(
+          c.env.ENV_BOT_TOKEN,
+          update.message.chat.id,
+          "❌ *Failed to Show Help*\n\n" +
+            "An error occurred while displaying help information\\.\n\n" +
+            `🔍 *Error:* ${escapeMarkdown(error instanceof Error ? error.message : String(error))}`,
+        );
+        return new Response("OK", { status: 200 });
+      }
     } else if (update.message?.text?.startsWith("/")) {
       try {
         await sendPlainText(

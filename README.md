@@ -433,6 +433,126 @@ For advanced users, you can customize:
 
 See the [full documentation](PR_AGENT_CHUTES_AI_SETUP.md) for more details.
 
+## Userbot Configuration
+
+The bot supports userbot functionality that allows it to operate as either a Telegram Bot or a Telegram User account. This provides flexibility for different use cases and access levels.
+
+### Authentication Modes
+
+The userbot supports two authentication modes:
+
+#### Bot Mode (Recommended)
+- **Authentication**: Uses Bot Token from @BotFather
+- **Setup**: Simple, no interactive login required
+- **Capabilities**: Standard bot functionality with API limitations
+- **Use Case**: General bot operations, automated responses
+
+#### User Mode
+- **Authentication**: Uses Phone Number + Password (with optional 2FA)
+- **Setup**: Requires phone verification during initial setup
+- **Capabilities**: Full user access to Telegram features
+- **Use Case**: Operations requiring user-level permissions, accessing user-only features
+
+### Secure Setup Script
+
+To securely configure userbot secrets without exposing sensitive data in your codebase, use the provided setup script:
+
+```bash
+# Run the interactive setup script
+node scripts/setup-userbot-secrets.js
+```
+
+The script will:
+1. Guide you through selecting an authentication mode
+2. Prompt for required credentials interactively
+3. Set secrets securely using Wrangler CLI
+4. Validate configuration before applying
+
+**Security Benefits:**
+- Secrets are stored in Cloudflare Workers environment, not in code
+- No sensitive data is committed to the repository
+- Interactive input prevents accidental exposure
+- Configuration validation ensures proper setup
+
+### Manual Secret Management
+
+If you prefer to set secrets manually, use the Wrangler CLI:
+
+```bash
+# Common secrets (required for both modes)
+wrangler secret put TELEGRAM_API_ID
+wrangler secret put TELEGRAM_API_HASH
+wrangler secret put USERBOT_ENABLED
+wrangler secret put USERBOT_AUTH_MODE
+
+# Bot mode secrets
+wrangler secret put TELEGRAM_BOT_TOKEN
+
+# User mode secrets
+wrangler secret put TELEGRAM_PHONE_NUMBER
+wrangler secret put TELEGRAM_PASSWORD  # Optional, for 2FA
+```
+
+### Getting Telegram API Credentials
+
+1. Visit [https://my.telegram.org](https://my.telegram.org)
+2. Login with your phone number
+3. Go to "API development tools"
+4. Create a new application to get API_ID and API_HASH
+5. For bot mode: Create a bot using [@BotFather](https://t.me/BotFather)
+
+### Environment Variables
+
+The following environment variables are used for userbot configuration:
+
+| Variable | Required | Mode | Description |
+|----------|----------|------|-------------|
+| `USERBOT_ENABLED` | Yes | Both | Enable/disable userbot functionality |
+| `USERBOT_AUTH_MODE` | Yes | Both | Authentication mode: "bot" or "user" |
+| `TELEGRAM_API_ID` | Yes | Both | Telegram API ID number |
+| `TELEGRAM_API_HASH` | Yes | Both | Telegram API hash string |
+| `TELEGRAM_BOT_TOKEN` | Bot only | Bot | Bot token from @BotFather |
+| `TELEGRAM_PHONE_NUMBER` | User only | User | Phone number with country code |
+| `TELEGRAM_PASSWORD` | No | User | 2FA password (if enabled) |
+
+### Session Management
+
+The userbot automatically manages session persistence:
+- Sessions are stored in Cloudflare KV namespace
+- Sessions are automatically loaded on worker startup
+- Sessions expire after 30 days (configurable)
+- Failed sessions are automatically cleared and recreated
+
+### Troubleshooting
+
+#### Common Issues
+
+**"Missing or invalid required environment variables"**
+- Run the setup script to ensure all required secrets are set
+- Verify Wrangler CLI is authenticated: `wrangler whoami`
+- Check that secrets are properly set: `wrangler secret list`
+
+**"Authentication failed"**
+- Verify API credentials are correct
+- For user mode: ensure phone number format includes country code
+- For bot mode: verify bot token is valid and not expired
+
+**"Session loading failed"**
+- Sessions may be corrupted or expired
+- The bot will automatically clear invalid sessions and create new ones
+- Check KV namespace is properly configured
+
+#### Commands for Userbot Management
+
+The bot provides several commands for managing userbot functionality:
+
+- `/userbot_start` - Start the userbot client
+- `/userbot_stop` - Stop the userbot client
+- `/userbot_status` - Check userbot connection status
+- `/userbot_info` - Get userbot user information
+- `/userbot_send <peer> <message>` - Send message using userbot
+- `/userbot_help` - Display userbot help information
+
 ## Security Features
 
 The bot implements multiple security features to ensure safe operation:
