@@ -142,12 +142,16 @@ export class UserbotAuth {
         return false;
       }
 
-      // Try to decode as base64 to ensure it's valid
-      // Note: We don't need the actual decoded data, just validation
-      atob(sessionString.replace(/_/g, '/').replace(/-/g, '+'));
+      // Validate base64 characters without using atob (not available in Workers)
+      const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-";
+      for (let i = 0; i < sessionString.length; i++) {
+        if (!base64Chars.includes(sessionString[i])) {
+          return false;
+        }
+      }
       
       return true;
-    } catch (error) {
+    } catch {
       // If base64 decoding fails, it's not a valid session string
       return false;
     }

@@ -61,7 +61,7 @@ export class UserbotClient {
           phoneNumber: async () => phoneNumber,
           password: async () => password || '',
           phoneCode: async () => {
-            throw new Error('Phone code verification not implemented - please use bot mode or provide session string');
+            throw new Error('User mode requires pre-authenticated session string. Please use bot mode or provide a valid session string.');
           },
           onError: (err) => {
             console.error('Authentication error:', err);
