@@ -20,7 +20,8 @@
     "pr-agent:setup": "node scripts/setup-chutes-ai.js",
     "pr-agent:test": "node scripts/test-chutes-ai.js",
     "pr-agent:debug": "node scripts/debug-chutes-ai.js",
-    "pr-agent:docs": "cat PR_AGENT_CHUTES_AI_SETUP.md"
+    "pr-agent:docs": "cat PR_AGENT_CHUTES_AI_SETUP.md",
+    "userbot:setup": "node scripts/setup-userbot-secrets.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -29,6 +30,7 @@
     "fast-png": "^6.3.0",
     "hono": "^4.6.14",
     "pdf-lib": "^1.17.1",
+    "telegram": "^2.26.22",
     "wasm-webp": "^0.0.2"
   },
   "devDependencies": {

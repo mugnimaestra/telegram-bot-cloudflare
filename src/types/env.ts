@@ -20,4 +20,12 @@ export interface Env {
   VIDEO_ANALYSIS_SERVICE_URL: string;
   // Webhook secret for video analysis job completion notifications
   WEBHOOK_SECRET: string;
+  // Userbot configuration
+  USERBOT_ENABLED?: string; // "true" to enable userbot functionality
+  USERBOT_API_ID?: string; // Telegram API ID for userbot
+  USERBOT_API_HASH?: string; // Telegram API Hash for userbot
+  USERBOT_BOT_TOKEN?: string; // Bot token for userbot (bot mode)
+  USERBOT_AUTH_MODE?: string; // Authentication mode: "bot" or "user"
+  TELEGRAM_PHONE_NUMBER?: string; // Phone number for user mode
+  TELEGRAM_PASSWORD?: string; // Password for 2FA in user mode
 }
